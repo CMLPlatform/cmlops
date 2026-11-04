@@ -1,8 +1,7 @@
 # cmlops
 
 The ML stack of a single GPU node at CML: a GPU queue, model serving behind a standard
-chat-completions HTTP API, one MLflow tracking server, a Cloudflare tunnel behind Access, and the
-host's telemetry as a spoke of [CML monitoring](https://github.com/CMLPlatform/monitoring).
+chat-completions HTTP API, one MLflow tracking server, and a Cloudflare tunnel behind Access.
 
 | Path           | What it is                                                                       |
 | -------------- | -------------------------------------------------------------------------------- |
@@ -59,7 +58,7 @@ the tool images in the justfile are pinned the same way and bumped by hand.
 
 ## Gate
 
-`cmlops gate quiet|gpu|cpu [--wait SECONDS] -- CMD...` runs CMD under a host-wide lock:
+`cmlops gate quiet|gpu|cpu [--wait SECONDS] -- CMD...` runs CMD under a lock shared by all of one user's jobs on the host:
 
 - `quiet` is a timing run: it waits until no cpu or quiet job runs, and keeps new ones out.
 - `cpu` is heavy work that is not timed. It runs beside other cpu and gpu jobs and waits while a

@@ -14,8 +14,7 @@ license: MIT
 openssf_badge: none
 project_description: 'The ML stack of a single GPU node at CML: a GPU queue, model
     serving behind a standard chat-completions HTTP API, one MLflow tracking server,
-    a Cloudflare tunnel behind Access, and the host''s telemetry as a spoke of CML
-    monitoring.'
+    and a Cloudflare tunnel behind Access.'
 project_name: cmlops
 public: true
 publish_to_ghcr: false

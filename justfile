@@ -116,7 +116,7 @@ repo-settings:
 
 # Set the GitHub About box from your answers: description and a topic per stack. Adds topics, never removes yours. Safe to rerun.
 repo-about:
-    gh repo edit --description 'The ML stack of a single GPU node at CML: a GPU queue, model serving behind a standard chat-completions HTTP API, one MLflow tracking server, a Cloudflare tunnel behind Access, and the host'\''s telemetry as a spoke of CML monitoring.' --add-topic docker
+    gh repo edit --description 'The ML stack of a single GPU node at CML: a GPU queue, model serving behind a standard chat-completions HTTP API, one MLflow tracking server, and a Cloudflare tunnel behind Access.' --add-topic docker
 
 # A repo's own recipes that copier updates never touch:
 import? 'just/local.just'
