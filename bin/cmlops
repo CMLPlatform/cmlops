@@ -21,9 +21,8 @@ usage() {
 #   quiet  a timing run: waits until no cpu or quiet job runs, and keeps new ones out
 #   cpu    heavy work that is not timed (backups, prunes, cleanups): runs beside
 #          other cpu and gpu jobs, waits while a quiet job runs
-#   gpu    one GPU job at a time, beside any quiet or cpu job: GPU work beside the CPU
-#          benchmarks left their medians unchanged (A/B of 2026-10-27), and the quiet helper
-#          moves its host side off the timed CPUs
+#   gpu    one GPU job at a time, beside any quiet or cpu job: GPU work does not move CPU
+#          timings, and the quiet helper moves its host side off the timed CPUs
 #
 # A gate that has to wait says so on stderr. --wait gives up after SECONDS with exit 75
 # (EX_TEMPFAIL) instead of waiting forever.
@@ -86,14 +85,14 @@ gate() {
     done
     return 1
   }
-  local main=1
+  local main=1 cpus=${CMLOPS_GATE_CPUS:-16-23}
   parent_quiet='' parent_cpus=''
   case $mode in
     quiet)
       if held CMLOPS_GATE_QUIET; then
-        [ "${CMLOPS_GATE_CPUS:-16-23}" != "${CMLOPS_GATE_ACTIVE_CPUS:-16-23}" ] || exec "$@"
+        [ "$cpus" != "${CMLOPS_GATE_ACTIVE_CPUS:-$cpus}" ] || exec "$@"
         parent_quiet=$CMLOPS_GATE_QUIET
-        parent_cpus=${CMLOPS_GATE_ACTIVE_CPUS:-16-23}
+        parent_cpus=${CMLOPS_GATE_ACTIVE_CPUS:-$cpus}
         main=''
       elif held CMLOPS_GATE_CPU; then
         echo "cmlops gate: quiet inside a cpu job would wait for itself" >&2
@@ -152,11 +151,11 @@ gate() {
   if [ "$mode" = quiet ] && [ -x "$helper" ]; then
     bench=1 # restore even after a failed on, which may have got half way
     # stderr: a remote caller may stream the job's stdout back.
-    sudo -n "$helper" bench on "${CMLOPS_GATE_CPUS:-16-23}" "$dir/gate.lock" "${parent_quiet:-$$}" >&2 ||
+    sudo -n "$helper" bench on "$cpus" "$dir/gate.lock" "${parent_quiet:-$$}" >&2 ||
       echo "cmlops gate: '$helper bench on' failed; running without bench mode, so timings from this run are not isolated" >&2
   fi
 
-  [ "$mode" != quiet ] || export CMLOPS_GATE_ACTIVE_CPUS=${CMLOPS_GATE_CPUS:-16-23}
+  [ "$mode" != quiet ] || export CMLOPS_GATE_ACTIVE_CPUS=$cpus
 
   # The job gets this script's stdin (a background job otherwise reads /dev/null) and none of
   # the lock fds.

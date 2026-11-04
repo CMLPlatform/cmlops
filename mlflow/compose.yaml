@@ -4,6 +4,7 @@
 # The image is the one version pin, by tag and digest. To upgrade: `docker compose stop mlflow`,
 # copy mlflow.db aside, change the tag and digest, `docker compose up -d --wait`. The server
 # migrates the store on start; clients talk HTTP, so their own mlflow version does not matter.
+# To roll back, stop it, restore the copy and the old tag and digest, and start it again.
 # 3.17.2 keeps the store at alembic revision dc11669786a5.
 services:
   mlflow:
@@ -16,6 +17,8 @@ services:
       # Two workers and no job runner: one user logging runs needs no more, and the defaults
       # (4 workers, plus the job runner for MLflow's GenAI scoring jobs) hold 3.7 GB of memory.
       MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+      # Silences a one-off tracing hint that `import mlflow` logs when it thinks an automated
+      # coding tool is driving; it only clutters the server log.
       MLFLOW_DISABLE_AGENT_HINT: "1"
     command:
       - mlflow

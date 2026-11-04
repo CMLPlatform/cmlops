@@ -13,14 +13,19 @@ spoke of [CML monitoring](https://github.com/CMLPlatform/monitoring).
 | `infra/`       | OpenTofu: the tunnel, its DNS records and Access                                 |
 | `serve/`       | The model servers `cmlops serve` starts per job, outside the root `compose.yaml` |
 | `tests/`       | Shell tests, run by `just check`                                                 |
+| `justfile`     | `just setup`, `just tofu`, `just token` and `just check`                         |
+| `.env.example` | The settings Docker Compose and `just` read, to copy to `.env`                   |
+| `.github/`     | CI, which runs `just check`, and Dependabot                                      |
 
 ## Deploying
 
 The node runs the stack from a clone of this repo. Nothing else on the host needs to know it
 exists beyond `bin/cmlops` on PATH and the tracking URI its users set.
 
-The host needs Docker Engine with the Compose plugin, `just`, OpenTofu (`just tofu` runs it on the
-host; only the `just infra` check uses a container), `flock`, `curl` and bash 4 or later.
+The host needs Docker Engine with the Compose plugin 2.20 or later (for `include` and the
+healthchecks' `start_interval`), `just`, OpenTofu (`just tofu` runs it on the host; only the
+`just infra` check uses a container), `flock`, `curl` and bash 4 or later. `cmlops serve` also
+needs the NVIDIA driver and the NVIDIA Container Toolkit.
 
 1. `cp .env.example .env` and fill it in. Docker Compose and `just` both read it.
 2. Set up the tunnel once (below), so `$CMLOPS_STATE/tunnel-token` exists.
@@ -49,7 +54,8 @@ To take over a node that already runs MLflow and a tunnel from elsewhere:
 5. Then `just setup` and `docker compose up -d --wait`.
 
 Every service binds to 127.0.0.1 only; the tunnel with Access is the only way in from outside.
-Images are pinned by tag and digest, and Dependabot bumps them.
+The service images in the compose files are pinned by tag and digest, and Dependabot bumps them;
+the tool images in the justfile are pinned the same way and bumped by hand.
 
 ## Gate
 
@@ -60,14 +66,16 @@ Images are pinned by tag and digest, and Dependabot bumps them.
   quiet job runs.
 - `gpu` is one GPU job at a time, beside any quiet or cpu job.
 
-A gate inside a gate runs at once rather than waiting for itself. `--wait` gives up with exit 75.
-While a quiet gate holds, an optional host helper can pin CPU clocks and move other work off the
-timed CPUs. The comment above `gate()` in `bin/cmlops` has the details and the settings.
+A gate inside a gate runs at once rather than waiting for itself, except quiet inside cpu, which
+exits 2, and a gpu gate inside another gate, which still waits for the GPU lock. `--wait` gives up
+with exit 75. While a quiet gate holds, an optional host helper can pin CPU clocks and move other
+work off the timed CPUs: `CMLOPS_GATE_HELPER` names it, and `CMLOPS_GATE_CPUS` sets the timed CPUs.
+The comment above `gate()` in `bin/cmlops` has the details.
 
 ## Serve
 
-`cmlops serve vllm|llama MODEL NAME -- CMD...` serves a local model behind a chat-completions API
-for the length of one command:
+`cmlops serve vllm|llama MODEL NAME [-- CMD...]` serves a local model behind a chat-completions
+API for the length of one command:
 
 ```sh
 cmlops serve vllm ~/.cache/huggingface/hub/models--Qwen--Qwen3.5-9B/snapshots/<rev> qwen3.5-9b \
@@ -82,7 +90,8 @@ MODEL is an absolute path under `CMLOPS_SERVE_HF` (default `~/.cache/huggingface
 It goes through `cmlops gate gpu`, starts the engine from `serve/compose.yaml` under a throwaway
 `tmp-serve-<pid>` project, waits until `/v1/models` answers, and runs CMD with `CMLOPS_SERVE_URL`,
 `CMLOPS_SERVE_NAME` and `CMLOPS_SERVE_IMAGE` (the pinned image, for a run's record) set. The
-server is removed on any exit, and CMD's exit code is serve's. No server runs all the time: an
+server is removed on any exit, and CMD's exit code is serve's. Without CMD the server stays up
+until serve is stopped; the URL is printed on stderr. No server runs all the time: an
 idle one would hold the GPU's memory outside the gate. The comment above `serve()` lists the
 settings.
 
@@ -93,7 +102,14 @@ A client talks HTTP and never opens the database itself, so a project's locked M
 need not match the store's schema: only the server's version does.
 
 The store is `$CMLOPS_MLFLOW_STORE`, mounted at `/mlflow`: `mlflow.db` and `artifacts/`. Back it
-up from the host. To upgrade MLflow, follow the comment at the top of `mlflow/compose.yaml`.
+up from the host. Copy the database through SQLite's backup API, never with `cp` while the server
+runs, which can copy a half-written file:
+
+```sh
+docker compose exec mlflow python -c "import sqlite3; sqlite3.connect('/mlflow/mlflow.db').backup(sqlite3.connect('/mlflow/mlflow.db.bak'))"
+```
+
+To upgrade MLflow, follow the comment at the top of `mlflow/compose.yaml`.
 
 ```sh
 export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
@@ -104,8 +120,14 @@ Leave the artifact location to the server: a new experiment gets `mlflow-artifac
 the client uploads artifacts through the server. A local `artifact_location` would record a path
 only one checkout has. `mlflow-skinny` is enough on the client side.
 
-To delete runs for good, always name them: `mlflow gc --backend-store-uri ... --run-ids <ids>`.
-Without `--run-ids`, `gc` purges every soft-deleted run in the store. Back up `mlflow.db` first.
+To delete runs for good, back up `mlflow.db` as above, then name the runs:
+
+```sh
+docker compose exec mlflow mlflow gc --backend-store-uri sqlite:////mlflow/mlflow.db \
+  --artifacts-destination /mlflow/artifacts --run-ids <ids>
+```
+
+Without `--run-ids`, `gc` purges every soft-deleted run in the store.
 
 ## Tunnel
 
@@ -182,7 +204,8 @@ just check   # lint, hygiene, compose config, tofu fmt/validate/test and tests/
 just hooks   # installs the git hooks (prek)
 ```
 
-The linters and OpenTofu run in pinned containers. A test that cannot run on the machine (no
+The linters and OpenTofu run in pinned containers, so `just check` needs Docker, and network
+access for the images and for `tofu init` to fetch the provider. `just hooks` needs prek. A test that cannot run on the machine (no
 Docker, not Linux) prints SKIP and does not fail.
 
 ## Licence
