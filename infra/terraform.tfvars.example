@@ -6,6 +6,9 @@ account_id = "your-account-id"
 zone_id    = "your-zone-id"
 domain     = "example.org"
 
+# The Zero Trust team name, as in <team_name>.cloudflareaccess.com, shown in the Zero Trust dashboard's settings.
+team_name = "your-team"
+
 # Who Access lets through, with a one-time PIN sent to the address.
 allowed_emails = ["you@example.org"]
 

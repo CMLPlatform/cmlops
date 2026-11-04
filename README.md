@@ -42,7 +42,9 @@ To take over a node that already runs MLflow and a tunnel from elsewhere:
    and `tunnel-token` into it.
 3. Run `just tofu init -reconfigure`, then `just tofu plan`. The plan must show no changes before
    any apply: an apply against empty state creates a second tunnel and DNS records that clash
-   with the existing ones.
+   with the existing ones. If the old setup published other hostnames, list them in `services` in
+   `terraform.tfvars` before the first plan, or the plan will delete them. A `terraform.tfvars`
+   from before `team_name` existed needs that line added too.
 4. Keep the existing store path in `CMLOPS_MLFLOW_STORE`.
 5. Then `just setup` and `docker compose up -d --wait`.
 
@@ -106,7 +108,9 @@ Without `--run-ids`, `gc` purges every soft-deleted run in the store. Back up `m
 A Cloudflare tunnel publishes the node's web UIs behind Cloudflare Access, so a browser opens
 them without `ssh -L`. `infra/` holds the tunnel, its ingress rules (ending in a 404), the DNS
 records, one Access application per hostname and one shared policy for the allowed emails. Access
-sends a one-time PIN to those addresses only; a session lasts 24 hours. The connector in
+sends a one-time PIN to those addresses only; a session lasts 24 hours. Each ingress rule also
+makes cloudflared check the Access token for its own application, so a request without one never
+reaches the service. The connector in
 `tunnel/compose.yaml` only dials out, and binds only a metrics port on 127.0.0.1:20241 for its
 healthcheck.
 
@@ -119,7 +123,8 @@ healthcheck.
    to the account and the zone, with: Account, Cloudflare Tunnel, Edit; Account, Access: Apps and
    Policies, Edit; Zone, DNS, Edit.
 2. Open the zone's Overview page: the API box in the right sidebar lists the Zone ID and the
-   Account ID.
+   Account ID. The Zero Trust dashboard's settings show the team name (`team_name`), the first
+   part of `<team_name>.cloudflareaccess.com`.
 3. Fill in the variables (`set -a; . ./.env; set +a` puts `CMLOPS_STATE` in the shell):
 
    ```sh

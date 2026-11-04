@@ -13,7 +13,19 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "node" {
 
   config = {
     ingress = concat(
-      [for sub, service in var.services : { hostname = "${sub}.${var.domain}", service = service }],
+      [for sub, service in var.services : {
+        hostname = "${sub}.${var.domain}"
+        service  = service
+        # cloudflared checks the Access token itself, so a request reaches the origin only through
+        # this hostname's Access application, even if that application is loosened or deleted.
+        origin_request = {
+          access = {
+            required  = true
+            team_name = var.team_name
+            aud_tag   = [cloudflare_zero_trust_access_application.node[sub].aud]
+          }
+        }
+      }],
       # Cloudflare requires a terminal rule; anything else gets a 404, never an origin.
       [{ service = "http_status:404" }],
     )

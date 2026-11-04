@@ -8,14 +8,15 @@ variables {
   zone_id        = "11111111111111111111111111111111"
   domain         = "example.org"
   allowed_emails = ["avery@example.org"]
+  team_name      = "example-team"
 }
 
 run "every_hostname_sits_behind_access" {
   command = plan
 
   assert {
-    condition     = output.hostnames == tolist(["beszel.example.org", "mlflow.example.org"])
-    error_message = "the tunnel must serve exactly the default services, mlflow and beszel."
+    condition     = output.hostnames == tolist(["mlflow.example.org"])
+    error_message = "the tunnel must serve exactly the default service, mlflow."
   }
 
   # A hostname in the ingress without an Access app would be open to anyone, and MLflow has no login.
@@ -26,6 +27,19 @@ run "every_hostname_sits_behind_access" {
       if rule.hostname != null
     ])
     error_message = "every ingress hostname must have an Access application."
+  }
+
+  # cloudflared itself checks the Access token, so a loosened or deleted Access app in the
+  # dashboard does not open the origin.
+  assert {
+    condition = alltrue([
+      for rule in cloudflare_zero_trust_tunnel_cloudflared_config.node.config.ingress :
+      try(rule.origin_request.access.required, false) == true &&
+      try(rule.origin_request.access.team_name, "") == "example-team" &&
+      length(try(rule.origin_request.access.aud_tag, [])) == 1
+      if rule.hostname != null
+    ])
+    error_message = "every ingress hostname must require the Access token for its own application."
   }
 
   assert {
