@@ -214,8 +214,12 @@ serve() {
   compose=("$docker" compose -f "$root/serve/compose.yaml" --profile "$engine")
   local url=http://127.0.0.1:$port/v1
 
+  child=''
   trap '"${compose[@]}" down --timeout 30 >/dev/null 2>&1 || true' EXIT
-  trap 'exit 143' TERM INT HUP
+  # CMD and the log follow run in the background: bash runs a trap only once the foreground
+  # command ends, so a TERM would otherwise wait for them, and a KILL after it would leave the
+  # server holding the GPU.
+  trap '[ -z "$child" ] || kill -TERM "$child" 2>/dev/null; exit 143' TERM INT HUP
   "${compose[@]}" up -d --quiet-pull "$engine" >&2
   local deadline=$((SECONDS + ${CMLOPS_SERVE_READY:-900}))
   until curl -sf --max-time 2 "$url/models" >/dev/null; do
@@ -231,12 +235,16 @@ serve() {
   export CMLOPS_SERVE_URL=$url
   CMLOPS_SERVE_IMAGE=$("${compose[@]}" config --images "$engine")
   export CMLOPS_SERVE_IMAGE
+  local rc=0
   if [ $# -eq 0 ]; then
-    "${compose[@]}" logs -f "$engine" >&2 || true
+    "${compose[@]}" logs -f "$engine" >&2 &
+    child=$!
+    wait "$child" || true
     exit 0
   fi
-  local rc=0
-  "$@" || rc=$?
+  "$@" <&0 &
+  child=$!
+  wait "$child" || rc=$?
   exit "$rc"
 }
 

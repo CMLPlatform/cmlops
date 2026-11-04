@@ -1,8 +1,8 @@
 #!/bin/bash
 # cmlops serve with a fake docker whose `compose up` starts a small HTTP server: the command runs
 # with the API's URL, name and image once /v1/models answers, its exit code passes through, the
-# server is removed on every exit, a server that dies is reported with its log, and the run goes
-# through the gpu gate.
+# server is removed on every exit, a server that dies is reported with its log, the run goes
+# through the gpu gate, and a TERM to the real gate removes the server with or without a command.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -15,7 +15,7 @@ echo '{"data": [{"id": "m"}]}' >"$SCRATCH/www/v1/models"
 port=$((20000 + RANDOM % 20000))
 
 # The fake: `up` serves www/ on CMLOPS_SERVE_PORT unless FAKE_DEAD is set, `ps` lists it while it
-# lives, `down` stops it; every call is logged with the project and model.
+# lives, `logs -f` follows until stopped, `down` stops it; every call is logged with the project and model.
 cat >"$SCRATCH/docker" <<EOF
 #!/bin/bash
 args=" \$* "
@@ -26,6 +26,7 @@ case \$args in
   python3 -m http.server -b 127.0.0.1 -d "$SCRATCH/www" "\$CMLOPS_SERVE_PORT" >/dev/null 2>&1 &
   echo \$! >"$SCRATCH/server.pid" ;;
 *" ps "*) [ -s "$SCRATCH/server.pid" ] && kill -0 "\$(cat "$SCRATCH/server.pid")" 2>/dev/null && echo id ;;
+*" logs -f "*) exec sleep 60 ;;
 *" logs "*) echo "fake engine log" ;;
 *" config "*) echo "engine/image:1@sha256:abc" ;;
 *" down "*) [ -s "$SCRATCH/server.pid" ] && kill "\$(cat "$SCRATCH/server.pid")" 2>/dev/null; : >"$SCRATCH/server.pid" ;;
@@ -68,6 +69,37 @@ rc=0
 PATH="$SCRATCH:$PATH" FAKE_DEAD=1 run vllm /m/snap m -- echo never >/dev/null || rc=$?
 [[ $rc == 1 ]] || fail "a failed bounded readiness probe exited $rc, not 1"
 grep -q -- '--max-time 2' "$SCRATCH/curl.args" || fail "the readiness probe had no two-second timeout"
+
+# TERM to the real gate reaches serve, which stops the command or the log follow and removes the
+# server, instead of waiting for them.
+term_case() { # term_case [-- CMD...]
+  : >"$SCRATCH/calls"
+  : >"$SCRATCH/err"
+  CMLOPS_GATE_DIR=$SCRATCH/locks CMLOPS_GATE_HELPER=$SCRATCH/no-helper CMLOPS_SERVE_DOCKER=$SCRATCH/docker \
+    CMLOPS_SERVE_PORT=$port CMLOPS_SERVE_READY=20 bash "$cmlops" serve vllm /m/snap m "$@" 2>"$SCRATCH/err" &
+  local gate=$! server _
+  for _ in $(seq 100); do
+    grep -q 'cmlops serve: m on' "$SCRATCH/err" && break
+    sleep 0.1
+  done
+  grep -q 'cmlops serve: m on' "$SCRATCH/err" || fail "the gated server never came up: $(cat "$SCRATCH/err")"
+  server=$(cat "$SCRATCH/server.pid")
+  kill -TERM "$gate"
+  for _ in $(seq 100); do
+    kill -0 "$gate" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$gate" 2>/dev/null; then
+    kill -9 "$gate" 2>/dev/null
+    kill "$server" 2>/dev/null
+    fail "serve ${1:+with a command }did not stop within 10 s of a TERM to the gate"
+  fi
+  wait "$gate" 2>/dev/null || true
+  grep -q ' down ' "$SCRATCH/calls" || fail "a TERM did not remove the server: $(cat "$SCRATCH/calls")"
+  ! kill -0 "$server" 2>/dev/null || fail "the server lives on after a TERM"
+}
+term_case -- sleep 60
+term_case
 
 for bad in "bogus /m n -- true" "vllm /m" "vllm /m n true"; do
   rc=0
