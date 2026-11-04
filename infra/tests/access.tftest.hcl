@@ -59,7 +59,7 @@ run "ingress_ends_in_a_404" {
   assert {
     condition = alltrue([
       for rule in cloudflare_zero_trust_tunnel_cloudflared_config.node.config.ingress :
-      startswith(rule.service, "http://127.0.0.1:") if rule.hostname != null
+      can(regex("^http://127\\.0\\.0\\.1:[0-9]{1,5}/?$", rule.service)) if rule.hostname != null
     ])
     error_message = "the tunnel may only reach services on this host's loopback."
   }
@@ -80,6 +80,28 @@ run "refuses_a_service_off_loopback" {
 
   variables {
     services = { mlflow = "http://0.0.0.0:5000" }
+  }
+
+  expect_failures = [var.services]
+}
+
+# 127.0.0.1:1 is the userinfo here; the request goes to 10.0.0.5.
+run "refuses_userinfo_that_looks_like_loopback" {
+  command = plan
+
+  variables {
+    services = { mlflow = "http://127.0.0.1:1@10.0.0.5:80" }
+  }
+
+  expect_failures = [var.services]
+}
+
+# localhost may resolve to ::1 or to anything /etc/hosts says.
+run "refuses_localhost" {
+  command = plan
+
+  variables {
+    services = { mlflow = "http://localhost:5000" }
   }
 
   expect_failures = [var.services]

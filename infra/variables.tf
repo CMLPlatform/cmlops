@@ -31,7 +31,8 @@ variable "services" {
     beszel = "http://127.0.0.1:8090"
   }
   validation {
-    condition     = alltrue([for service in values(var.services) : startswith(service, "http://127.0.0.1:")])
-    error_message = "Services must listen on this host's 127.0.0.1, so Access stays the only way in."
+    # A prefix check would pass http://127.0.0.1:1@10.0.0.5, whose host is 10.0.0.5.
+    condition     = alltrue([for service in values(var.services) : can(regex("^http://127\\.0\\.0\\.1:[0-9]{1,5}/?$", service))])
+    error_message = "Each service must be http://127.0.0.1:<port>, so Access stays the only way in."
   }
 }
