@@ -19,7 +19,8 @@ secrets:
     git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
     docker run --rm --user "$(id -u):$(id -g)" -v "{{ justfile_directory() }}:/src:ro" -v "$git_dir:$git_dir:ro" -w /src {{ gitleaks }} git --no-banner /src
 
-# Tracked files hold no home directory paths and no email addresses but GitHub noreply and the
+# Tracked files hold no home directory paths and no email addresses but GitHub noreply, the
+# project contact address (info@r9lab.io) and the
 # reserved example domains: a host's layout or a person's address does not belong in the repo.
 hygiene:
     #!/usr/bin/env bash
@@ -27,7 +28,7 @@ hygiene:
     bad=0
     if git grep -nE '/(home|Users)/[A-Za-z0-9_.-]'; then bad=1; fi
     if git grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' |
-      grep -vE '@(users\.noreply\.github\.com|example\.(org|com|net))'; then bad=1; fi
+      grep -vE '@(users\.noreply\.github\.com|example\.(org|com|net))|info@r9lab\.io'; then bad=1; fi
     [ "$bad" = 0 ] || { echo "error: home paths or email addresses in tracked files (above)" >&2; exit 1; }
 
 # The per-job serve compose file parses with every profile (docker-check covers compose.yaml).
