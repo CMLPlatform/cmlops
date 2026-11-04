@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "editorconfig.editorconfig",
+    "rvben.rumdl",
+    "tombi-toml.tombi",
+    "bluebrown.yamlfmt",
+    "ms-azuretools.vscode-containers"
+  ]
+}
