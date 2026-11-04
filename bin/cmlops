@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The node's command line: a host-wide gate for jobs, and model servers that live for one job.
+# The node's command line: a per-user gate for jobs, and model servers that live for one job.
 #
 # Usage: cmlops gate quiet|gpu|cpu [--wait SECONDS] -- cmd...
 #        cmlops serve vllm|llama MODEL NAME [-- CMD...]
@@ -16,7 +16,7 @@ usage() {
   exit 2
 }
 
-# gate: a host-wide gate between jobs that time something and jobs that only use the machine.
+# gate: a gate, shared by one user's jobs on the host, between jobs that time something and jobs that only use the machine.
 #
 #   quiet  a timing run: waits until no cpu or quiet job runs, and keeps new ones out
 #   cpu    heavy work that is not timed (backups, prunes, cleanups): runs beside
@@ -40,9 +40,9 @@ usage() {
 # quiet or cpu still takes gpu.lock, after gate.lock: the reverse of a GPU timing run's order
 # (gpu, then quiet), so a queued job under quiet must not start a GPU job.
 #
-# While quiet is held, an optional host helper (CMLOPS_GATE_HELPER, default
-# /usr/local/sbin/office-quiet), run as `sudo -n HELPER bench on CPUS LOCK PID`, fixes CPU
-# clocks and GPU power and moves other work off CPUS (CMLOPS_GATE_CPUS, default 16-23);
+# While quiet is held, an optional host helper (the path in CMLOPS_GATE_HELPER; unset, none
+# runs), run as `sudo -n HELPER bench on CPUS LOCK PID`, fixes CPU
+# clocks and GPU power and moves other work off CPUS (CMLOPS_GATE_CPUS, default 16-23, so set it to the host's timed CPUs);
 # `bench off` undoes it on exit. A host without the helper skips this. The helper should also
 # undo it on its own once no quiet gate holds LOCK, to recover from a crash.
 # LOCK is $dir/gate.lock, with $dir from CMLOPS_GATE_DIR or $XDG_RUNTIME_DIR/cmlops-gate, and the
@@ -135,7 +135,7 @@ gate() {
   # The helper must keep the PID that owns the lock, including inside a nested gate.
   [ -n "$parent_quiet" ] || export "CMLOPS_GATE_${mode^^}=$$"
 
-  helper=${CMLOPS_GATE_HELPER:-/usr/local/sbin/office-quiet}
+  helper=${CMLOPS_GATE_HELPER:-}
   bench='' child=''
   # Restore bench mode on any exit; a signal before the job starts ends the gate.
   trap '
