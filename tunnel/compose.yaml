@@ -1,6 +1,6 @@
-# The tunnel connector. It dials out to Cloudflare and binds nothing; the hostnames, their
-# services and Access live in infra/. The root compose.yaml includes this file; restart:
-# unless-stopped brings it back after a crash or a reboot.
+# The tunnel connector. It dials out to Cloudflare and binds only a loopback metrics port; the
+# hostnames, their services and Access live in infra/. The root compose.yaml includes this file;
+# restart: unless-stopped brings it back after a crash or a reboot.
 #
 # The image is pinned by tag and digest. To upgrade, change both and run `docker compose up -d` again.
 services:
@@ -12,7 +12,15 @@ services:
     restart: unless-stopped
     # The services it fronts listen on the host's 127.0.0.1 only.
     network_mode: host
-    command: tunnel --no-autoupdate run
+    # With host networking the default metrics address is every interface, and the metrics server
+    # also answers /config (every hostname and its port) and /debug/pprof.
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run
+    healthcheck:
+      test: [CMD, cloudflared, tunnel, --metrics, 127.0.0.1:20241, ready]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      start_interval: 2s
     # A secret file, not TUNNEL_TOKEN: an environment variable shows in `docker inspect`.
     environment:
       TUNNEL_TOKEN_FILE: /run/secrets/tunnel_token

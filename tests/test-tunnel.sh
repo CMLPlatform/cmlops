@@ -2,8 +2,9 @@
 # The tunnel connector without Cloudflare: `just setup` without a token file creates the dirs and
 # says only MLflow can start, it refuses a readable token file, and the connector, run as the user
 # from the root compose.yaml, reads a mode-600 token file (a bogus token gets "not valid", not
-# "permission denied"). Without a running Docker, or offline without the connector's image, it
-# skips. `just infra` covers infra/.
+# "permission denied"); its metrics server listens on loopback only and backs its healthcheck.
+# Without a running Docker, or offline without the connector's image, it skips. `just infra`
+# covers infra/.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -28,6 +29,18 @@ out=$(setup) && die "tunnel: setup passed with a mode-644 token file"
 [[ $out == *"mode 600"* ]] || die "tunnel: setup with a readable token said '$out'"
 chmod 600 "$token"
 setup >/dev/null || die "tunnel: setup refused a mode-600 token file"
+# With host networking, cloudflared's default metrics address is every interface, and it serves
+# the tunnel's config and pprof there.
+need python3
+compose_test config --format json | python3 -c '
+import json, sys
+svc = json.load(sys.stdin)["services"]["cloudflared"]
+cmd, check = svc["command"], svc.get("healthcheck", {}).get("test", [])
+at = lambda xs: xs[xs.index("--metrics") + 1] if "--metrics" in xs else None
+assert at(cmd) is not None and at(cmd).startswith("127.0.0.1:"), f"metrics not on loopback: {cmd}"
+assert check[-1:] == ["ready"] and at(check) == at(cmd), f"healthcheck does not ask the metrics server: {check}"
+' || die "tunnel: the connector's metrics or healthcheck are wrong"
+
 # The bogus token is refused locally, so only the image needs the network.
 image=$(compose_test config --images cloudflared)
 docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image" >/dev/null 2>&1 || {

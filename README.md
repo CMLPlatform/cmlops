@@ -107,7 +107,8 @@ A Cloudflare tunnel publishes the node's web UIs behind Cloudflare Access, so a 
 them without `ssh -L`. `infra/` holds the tunnel, its ingress rules (ending in a 404), the DNS
 records, one Access application per hostname and one shared policy for the allowed emails. Access
 sends a one-time PIN to those addresses only; a session lasts 24 hours. The connector in
-`tunnel/compose.yaml` only dials out and binds no port.
+`tunnel/compose.yaml` only dials out, and binds only a metrics port on 127.0.0.1:20241 for its
+healthcheck.
 
 `just tofu` runs OpenTofu with everything private in `$CMLOPS_STATE` (mode 700): the state, its
 `.terraform` dir and `terraform.tfvars`. `just token` writes the connector's token there.
