@@ -1,0 +1,8 @@
+# Every long-running service on the node. After `just setup`, deploy with
+# `docker compose up -d --wait` from this directory. Model servers are per job (`cmlops serve`,
+# serve/compose.yaml) and stay out of it.
+name: cmlops
+
+include:
+  - mlflow/compose.yaml
+  - tunnel/compose.yaml

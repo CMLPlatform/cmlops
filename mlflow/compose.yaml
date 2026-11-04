@@ -1,0 +1,44 @@
+# The node's MLflow tracking server, always on, on 127.0.0.1 only. The root compose.yaml includes
+# this file; restart: unless-stopped brings it back after a crash or a reboot.
+#
+# The image is the one version pin, by tag and digest. To upgrade: `docker compose stop mlflow`,
+# copy mlflow.db aside, change the tag and digest, `docker compose up -d --wait`. The server
+# migrates the store on start; clients talk HTTP, so their own mlflow version does not matter.
+# 3.17.2 keeps the store at alembic revision dc11669786a5.
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.17.2@sha256:2cc40b3208991940d824d04f339833a0b69507569012aa5ec545690608602fc0
+    # The host user, so the store stays owned by them.
+    user: ${CMLOPS_UID:?set CMLOPS_UID in .env (id -u)}:${CMLOPS_GID:?set CMLOPS_GID in .env (id -g)}
+    restart: unless-stopped
+    environment:
+      HOME: /tmp
+      # Two workers and no job runner: one user logging runs needs no more, and the defaults
+      # (4 workers, plus the job runner for MLflow's GenAI scoring jobs) hold 3.7 GB of memory.
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+      MLFLOW_DISABLE_AGENT_HINT: "1"
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --workers=2
+      - --backend-store-uri=sqlite:////mlflow/mlflow.db
+      - --artifacts-destination=/mlflow/artifacts
+      - --serve-artifacts
+      # Host-header and CORS checks: MLflow refuses any other host. The public name is the one
+      # the tunnel publishes; localhost on any port covers an ssh forward and the test.
+      - --allowed-hosts=${CMLOPS_MLFLOW_HOST:?set CMLOPS_MLFLOW_HOST in .env},localhost:*,127.0.0.1:*,localhost,127.0.0.1
+      - --cors-allowed-origins=https://${CMLOPS_MLFLOW_HOST}
+    volumes:
+      # `just setup` creates it: Docker would create a missing bind-mount source as root.
+      - ${CMLOPS_MLFLOW_STORE:?set CMLOPS_MLFLOW_STORE in .env}:/mlflow
+    ports:
+      - 127.0.0.1:${CMLOPS_MLFLOW_PORT:-5000}:5000
+    # The image has no curl.
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request as u; u.urlopen('http://127.0.0.1:5000/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      start_interval: 2s

@@ -1,0 +1,15 @@
+# Copy to $CMLOPS_STATE/terraform.tfvars and fill in. The API token is not set here:
+# export CLOUDFLARE_API_TOKEN instead (README.md lists its permissions).
+
+# dash.cloudflare.com -> your domain -> Overview, "API" box in the right sidebar.
+account_id = "your-account-id"
+zone_id    = "your-zone-id"
+domain     = "example.org"
+
+# Who Access lets through, with a one-time PIN sent to the address.
+allowed_emails = ["you@example.org"]
+
+# Subdomain -> service on this host; the default is in variables.tf.
+# services = {
+#   mlflow = "http://127.0.0.1:5000"
+# }
