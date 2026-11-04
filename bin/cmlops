@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# The node's command line: a host-wide gate for jobs, and model servers that live for one job.
+#
+# Usage: cmlops gate quiet|gpu|cpu [--wait SECONDS] -- cmd...
+#        cmlops serve vllm|llama MODEL NAME [-- CMD...]
+#
+# README.md describes both; the comment above each function lists its settings.
+set -euo pipefail
+
+self=$(realpath -- "$0")
+root=$(dirname "$(dirname "$self")")
+
+usage() {
+  echo "usage: cmlops gate quiet|gpu|cpu [--wait SECONDS] -- cmd..." >&2
+  echo "       cmlops serve vllm|llama MODEL NAME [-- CMD...]" >&2
+  exit 2
+}
+
+# gate: a host-wide gate between jobs that time something and jobs that only use the machine.
+#
+#   quiet  a timing run: waits until no cpu or quiet job runs, and keeps new ones out
+#   cpu    heavy work that is not timed (backups, prunes, cleanups): runs beside
+#          other cpu and gpu jobs, waits while a quiet job runs
+#   gpu    one GPU job at a time, beside any quiet or cpu job: GPU work does not move CPU
+#          timings, and the quiet helper moves its host side off the timed CPUs
+#
+# A gate that has to wait says so on stderr. --wait gives up after SECONDS with exit 75
+# (EX_TEMPFAIL) instead of waiting forever.
+# Otherwise the exit code is the command's.
+#
+# The locks are flock(1) locks on files in $XDG_RUNTIME_DIR/cmlops-gate (CMLOPS_GATE_DIR for
+# the test): gate.lock, exclusive for quiet and shared for cpu, and gpu.lock, exclusive for
+# gpu. Only this script holds them; the command runs without the lock's fd, so a daemon the
+# command leaves behind does not keep the gate shut. The gate stays held until the command exits.
+#
+# A gate inside a gate (a queued job that runs a timed benchmark) runs at once: CMLOPS_GATE_QUIET,
+# CMLOPS_GATE_CPU and CMLOPS_GATE_GPU name the pid of the gate that holds each, and count only
+# while that gate is an ancestor. A nested quiet gate switches CPUs for its command, then
+# restores the outer selection. quiet inside cpu would wait for itself: exit 2. gpu inside
+# quiet or cpu still takes gpu.lock, after gate.lock: the reverse of a GPU timing run's order
+# (gpu, then quiet), so a queued job under quiet must not start a GPU job.
+#
+# While quiet is held, an optional host helper (CMLOPS_GATE_HELPER, default
+# /usr/local/sbin/office-quiet), run as `sudo -n HELPER bench on CPUS LOCK PID`, fixes CPU
+# clocks and GPU power and moves other work off CPUS (CMLOPS_GATE_CPUS, default 16-23);
+# `bench off` undoes it on exit. A host without the helper skips this. The helper should also
+# undo it on its own once no quiet gate holds LOCK, to recover from a crash.
+# LOCK is $dir/gate.lock, with $dir from CMLOPS_GATE_DIR or $XDG_RUNTIME_DIR/cmlops-gate, and the
+# helper must accept that path. A helper that refuses it fails `bench on`: the quiet run then goes
+# ahead without bench mode, and only a line on stderr says so.
+gate() {
+  local mode=${1:-}
+  case $mode in quiet | gpu | cpu) shift ;; *) usage ;; esac
+  wait=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --wait)
+        [[ ${2:-} =~ ^[0-9]+$ ]] || usage
+        wait=$2
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *) usage ;;
+    esac
+  done
+  [ $# -gt 0 ] || usage
+
+  held() { # held VAR: the gate whose pid VAR names is an ancestor of this process
+    local pid=${!1:-} p=$PPID
+    [ -n "$pid" ] || return 1
+    # A reused pid: a variable inherited from a gate long gone may name another process now.
+    local a gate=''
+    while IFS= read -r -d '' a; do
+      case $a in /*) ;; *) a=/proc/$pid/cwd/$a ;; esac # a relative path is relative to that gate's cwd
+      [ "$(realpath -q -- "$a" 2>/dev/null)" != "$self" ] || gate=1
+    done <"/proc/$pid/cmdline" 2>/dev/null
+    [ -n "$gate" ] || return 1
+    while [ "$p" -gt 1 ]; do
+      [ "$p" = "$pid" ] && return 0
+      p=$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$p/status" 2>/dev/null) || return 1
+      [ -n "$p" ] || return 1
+    done
+    return 1
+  }
+  local main=1 cpus=${CMLOPS_GATE_CPUS:-16-23}
+  parent_quiet='' parent_cpus=''
+  case $mode in
+    quiet)
+      if held CMLOPS_GATE_QUIET; then
+        [ "$cpus" != "${CMLOPS_GATE_ACTIVE_CPUS:-$cpus}" ] || exec "$@"
+        parent_quiet=$CMLOPS_GATE_QUIET
+        parent_cpus=${CMLOPS_GATE_ACTIVE_CPUS:-$cpus}
+        main=''
+      elif held CMLOPS_GATE_CPU; then
+        echo "cmlops gate: quiet inside a cpu job would wait for itself" >&2
+        exit 2
+      fi
+      ;;
+    cpu) if held CMLOPS_GATE_QUIET || held CMLOPS_GATE_CPU; then exec "$@"; fi ;;
+    gpu)
+      if held CMLOPS_GATE_GPU; then exec "$@"; fi
+      main=
+      ;;
+  esac
+
+  dir=${CMLOPS_GATE_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/cmlops-gate}
+  mkdir -p "$dir"
+  local deadline=$((SECONDS + ${wait:-0}))
+  local fds=()
+  take() { # take -x|-s FILE WHO: WHO names the holders it may wait for
+    local fd t=()
+    exec {fd}>>"$2"
+    if flock "$1" -n "$fd"; then
+      fds+=("$fd")
+      return
+    fi
+    echo "cmlops gate: waiting for $3 holders" >&2
+    if [ -n "$wait" ]; then
+      # flock -w 0 would wait forever.
+      if [ $((deadline - SECONDS)) -gt 0 ]; then t=(-w $((deadline - SECONDS))); else t=(-n); fi
+    fi
+    flock "$1" "${t[@]}" "$fd" || {
+      echo "cmlops gate: $mode: still busy after ${wait}s" >&2
+      exit 75
+    }
+    fds+=("$fd")
+  }
+  [ "$mode" != gpu ] || take -x "$dir/gpu.lock" gpu
+  if [ -n "$main" ]; then
+    if [ "$mode" = quiet ]; then take -x "$dir/gate.lock" cpu/gpu/quiet; else take -s "$dir/gate.lock" quiet; fi
+  fi
+  # The helper must keep the PID that owns the lock, including inside a nested gate.
+  [ -n "$parent_quiet" ] || export "CMLOPS_GATE_${mode^^}=$$"
+
+  helper=${CMLOPS_GATE_HELPER:-/usr/local/sbin/office-quiet}
+  bench='' child=''
+  # Restore bench mode on any exit; a signal before the job starts ends the gate.
+  trap '
+    if [ -n "$bench" ]; then
+      if [ -n "$parent_quiet" ]; then
+        sudo -n "$helper" bench on "$parent_cpus" "$dir/gate.lock" "$parent_quiet" >&2 || true
+      else
+        sudo -n "$helper" bench off >/dev/null 2>&1 || true
+      fi
+    fi
+  ' EXIT
+  trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; else exit 143; fi' TERM INT HUP
+  if [ "$mode" = quiet ] && [ -x "$helper" ]; then
+    bench=1 # restore even after a failed on, which may have got half way
+    # stderr: a remote caller may stream the job's stdout back.
+    sudo -n "$helper" bench on "$cpus" "$dir/gate.lock" "${parent_quiet:-$$}" >&2 ||
+      echo "cmlops gate: '$helper bench on' failed; running without bench mode, so timings from this run are not isolated" >&2
+  fi
+
+  [ "$mode" != quiet ] || export CMLOPS_GATE_ACTIVE_CPUS=$cpus
+
+  # The job gets this script's stdin (a background job otherwise reads /dev/null) and none of
+  # the lock fds.
+  (
+    for fd in "${fds[@]}"; do exec {fd}>&-; done
+    exec "$@"
+  ) <&0 &
+  child=$!
+  local rc
+  while :; do
+    rc=0
+    wait "$child" || rc=$?
+    kill -0 "$child" 2>/dev/null || break # a trapped signal ended the wait, not the job
+  done
+  exit "$rc"
+}
+
+# serve: a model behind a chat-completions API for the length of one command, then removed.
+#
+#   MODEL  a Hugging Face snapshot dir (vllm) or a GGUF file (llama), on a path the container sees:
+#          under CMLOPS_SERVE_HF (default ~/.cache/huggingface) or CMLOPS_SERVE_MODELS (default
+#          serve/models in this clone)
+#   NAME   the model name the API serves it under
+#   CMD    runs once the server answers, with CMLOPS_SERVE_URL (http://127.0.0.1:PORT/v1),
+#          CMLOPS_SERVE_NAME and CMLOPS_SERVE_IMAGE (the pinned image, for a run's manifest) set.
+#          Without CMD the server stays up until serve is stopped.
+#
+# CMLOPS_SERVE_ARGS adds engine flags (`--language-model-only`, `--n-cpu-moe 20`); CMLOPS_SERVE_PORT
+# (default 8000), CMLOPS_SERVE_READY (seconds to wait for the API, default 900) and
+# CMLOPS_SERVE_FAIL_LINES (log lines shown when the engine fails to start, default 40) tune the rest.
+# The run goes through `cmlops gate gpu`, so it waits for another GPU job and never for a CPU
+# timing. The exit code is CMD's; the server is removed on any exit. Engines and images:
+# serve/compose.yaml. CMLOPS_SERVE_GATE and CMLOPS_SERVE_DOCKER swap the gate and docker, for
+# the test.
+serve() {
+  [ $# -ge 3 ] || usage
+  local engine=$1 model=$2 name=$3
+  shift 3
+  case $engine in vllm | llama) ;; *) usage ;; esac
+  if [ $# -gt 0 ]; then
+    [ "$1" = -- ] || usage
+    shift
+  fi
+
+  if [ -z "${CMLOPS_SERVE_GATED:-}" ]; then
+    local gate=("$self" gate)
+    [ -z "${CMLOPS_SERVE_GATE:-}" ] || gate=("$CMLOPS_SERVE_GATE")
+    CMLOPS_SERVE_GATED=1 exec "${gate[@]}" gpu -- "$self" serve "$engine" "$model" "$name" ${1+--} "$@"
+  fi
+
+  local docker=${CMLOPS_SERVE_DOCKER:-docker}
+  local port=${CMLOPS_SERVE_PORT:-8000}
+  export CMLOPS_SERVE_PROJECT=tmp-serve-$$ CMLOPS_SERVE_MODEL=$model CMLOPS_SERVE_NAME=$name CMLOPS_SERVE_PORT=$port
+  CMLOPS_SERVE_UID=$(id -u) CMLOPS_SERVE_GID=$(id -g)
+  export CMLOPS_SERVE_HF=${CMLOPS_SERVE_HF:-$HOME/.cache/huggingface} CMLOPS_SERVE_UID CMLOPS_SERVE_GID
+  export CMLOPS_SERVE_MODELS=${CMLOPS_SERVE_MODELS:-$root/serve/models}
+  compose=("$docker" compose -f "$root/serve/compose.yaml" --profile "$engine")
+  local url=http://127.0.0.1:$port/v1
+
+  child=''
+  trap '"${compose[@]}" down --timeout 30 >/dev/null 2>&1 || true' EXIT
+  # CMD and the log follow run in the background: bash runs a trap only once the foreground
+  # command ends, so a TERM would otherwise wait for them, and a KILL after it would leave the
+  # server holding the GPU.
+  trap '[ -z "$child" ] || kill -TERM "$child" 2>/dev/null; exit 143' TERM INT HUP
+  "${compose[@]}" up -d --quiet-pull "$engine" >&2
+  local deadline=$((SECONDS + ${CMLOPS_SERVE_READY:-900}))
+  until curl -sf --max-time 2 "$url/models" >/dev/null; do
+    if [ -z "$("${compose[@]}" ps -q --status running "$engine")" ] || [ "$SECONDS" -ge "$deadline" ]; then
+      echo "cmlops serve: $engine did not come up; its last log lines:" >&2
+      "${compose[@]}" logs --tail "${CMLOPS_SERVE_FAIL_LINES:-40}" "$engine" >&2 || true
+      exit 1
+    fi
+    sleep 2
+  done
+  echo "cmlops serve: $name on $url" >&2
+
+  export CMLOPS_SERVE_URL=$url
+  CMLOPS_SERVE_IMAGE=$("${compose[@]}" config --images "$engine")
+  export CMLOPS_SERVE_IMAGE
+  local rc=0
+  if [ $# -eq 0 ]; then
+    "${compose[@]}" logs -f "$engine" >&2 &
+    child=$!
+    wait "$child" || true
+    exit 0
+  fi
+  "$@" <&0 &
+  child=$!
+  wait "$child" || rc=$?
+  exit "$rc"
+}
+
+cmd=${1:-}
+case $cmd in
+  gate | serve)
+    shift
+    "$cmd" "$@"
+    ;;
+  *) usage ;;
+esac

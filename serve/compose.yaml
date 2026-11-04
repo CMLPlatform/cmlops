@@ -1,0 +1,39 @@
+# Model servers for `cmlops serve`, one profile per engine. serve starts one per job under a
+# throwaway project name and removes it afterwards. The root compose.yaml does not include this
+# file: an idle server would hold the GPU's memory outside `cmlops gate`.
+#
+# Each answers a chat-completions API on 127.0.0.1:${CMLOPS_SERVE_PORT}. Images are pinned by tag
+# and digest; Dependabot moves both.
+name: ${CMLOPS_SERVE_PROJECT:-cmlops-serve}
+
+x-common: &common
+  user: ${CMLOPS_SERVE_UID:-1000}:${CMLOPS_SERVE_GID:-1000}
+  gpus: all
+  environment:
+    HOME: /tmp
+    HF_HUB_OFFLINE: "1"
+    MODEL: ${CMLOPS_SERVE_MODEL:?the model path or name}
+    NAME: ${CMLOPS_SERVE_NAME:?the served model name}
+    SERVE_ARGS: ${CMLOPS_SERVE_ARGS:-}
+  volumes:
+    # Hugging Face snapshots are symlinks into a shared blob store, so the cache mounts at its own path.
+    # `cmlops serve` sets both; a missing source would be created as root.
+    - ${CMLOPS_SERVE_HF:?the Hugging Face cache}:${CMLOPS_SERVE_HF}:ro
+    - ${CMLOPS_SERVE_MODELS:?the models dir}:${CMLOPS_SERVE_MODELS}:ro
+  ports:
+    - 127.0.0.1:${CMLOPS_SERVE_PORT:-8000}:8000
+
+services:
+  vllm:
+    !!merge <<: *common
+    profiles: [vllm]
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+    ipc: host # vLLM's workers share tensors through /dev/shm
+    entrypoint: [sh, -c, 'exec vllm serve "$$MODEL" --served-model-name "$$NAME" --host 0.0.0.0 --port 8000 $$SERVE_ARGS']
+
+  llama:
+    !!merge <<: *common
+    profiles: [llama]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13-b12030@sha256:fc3c1a48c228d5e11b49f2921e144e00c876938b1e178936f9aecd7586f8a573
+    # -ngl 99: every layer on the GPU; MoE models that do not fit add --n-cpu-moe N in CMLOPS_SERVE_ARGS.
+    entrypoint: [sh, -c, 'exec /app/llama-server -m "$$MODEL" --alias "$$NAME" --host 0.0.0.0 --port 8000 -ngl 99 $$SERVE_ARGS']
