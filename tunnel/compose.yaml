@@ -16,7 +16,7 @@ services:
     # also answers /config (every hostname and its port) and /debug/pprof.
     command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run
     healthcheck:
-      test: [CMD, cloudflared, tunnel, --metrics, 127.0.0.1:20241, ready]
+      test: [CMD, cloudflared, tunnel, --metrics, '127.0.0.1:20241', ready]
       interval: 30s
       timeout: 5s
       start_period: 30s

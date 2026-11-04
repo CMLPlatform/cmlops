@@ -1,0 +1,24 @@
+# Managed by copier. Do not edit by hand. Run: copier update
+_commit: v0.13.0-1-ge9e2a83
+_src_path: gh:simonvanlierde/project-templates
+app_port: 8000
+author_email: 90462640+simonvanlierde@users.noreply.github.com
+author_name: Simon van Lierde
+cold_install: false
+copyright_year: '2026'
+customise: false
+dependency_bot: dependabot
+docker_stacks: []
+github_user: CMLPlatform
+license: MIT
+openssf_badge: none
+project_description: 'The ML stack of a single GPU node at CML: a GPU queue, model
+    serving behind a standard chat-completions HTTP API, one MLflow tracking server,
+    a Cloudflare tunnel behind Access, and the host''s telemetry as a spoke of CML
+    monitoring.'
+project_name: cmlops
+public: true
+publish_to_ghcr: false
+site: none
+stacks:
+- docker

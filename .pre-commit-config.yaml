@@ -1,27 +1,125 @@
-# Installed by `just hooks` (prek).
-#   pre-commit  gitleaks on the staged diff
-#   commit-msg  Conventional Commits shape on the first line
-#   pre-push    `just check`
+# Run with prek, a drop-in pre-commit replacement: prek install && prek run -a
+#
+# Python projects get prek from `uv tool install prek`. TypeScript-only projects
+# get it from the @j178/prek devDependency. Revs are commit SHAs, since tags are
+# mutable; the dependency bot moves each SHA and its `# frozen:` tag together.
+
+# `prek install` sets up each of these: the commit message is checked as you commit.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-yaml
+        # pnpm writes its own version into the lockfile as a second YAML document.
+        exclude: (^|/)pnpm-lock\.yaml$
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+      # Not gated to python: .rumdl.toml ships to every stack.
+      - id: check-toml
+
+  # Commit messages follow committed.toml: Conventional Commits, imperative, no period.
+  - repo: https://github.com/crate-ci/committed
+    rev: faeed42f2e10c244533a01525f13c4d8b6ce383f # frozen: v1.1.11
+    hooks:
+      - id: committed
+        # git writes a merge commit's message itself, so skip the check during a merge.
+        entry: sh -c 'test -f "$(git rev-parse --git-path MERGE_HEAD)" || exec committed "$@"' --
+
+  # Refuse an unsigned commit before the dco workflow sees it: that checks fork pull requests,
+  # and every pull request with openssf_badge=silver. Merge commits are skipped, as there.
   - repo: local
     hooks:
-      - id: gitleaks
-        name: gitleaks (staged)
-        entry: just _gitleaks-staged
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]
-      - id: commit-msg
-        name: conventional commit message
-        entry: >-
-          sh -c 'head -n1 "$1"
-          | grep -Eq "^((build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?!?:
-          [a-z].{0,81}|(Merge|Revert|fixup!|squash!) .*)$"
-          || { echo "commit message must be type(scope): lower-case summary, at most 82 chars" >&2; exit 1; }' --
+      - id: dco-signoff
+        name: commit message has a Signed-off-by line (git commit -s)
+        entry: sh -c 'test -f "$(git rev-parse --git-path MERGE_HEAD)" || grep -qE "^Signed-off-by:[ ].+ <[^>]+>[[:space:]]*$" "$1"' --
         language: system
         stages: [commit-msg]
-      - id: check
+
+  # Every file has a copyright and license, from REUSE.toml or its own header.
+  - repo: https://github.com/fsfe/reuse-tool
+    rev: a1bb792acda6fd0724936b4ebbdbc8eceb9c0459 # frozen: v6.2.0
+    hooks:
+      - id: reuse
+
+  # Not gated to ts: .vscode/ and .github/rulesets/ JSON ship to every stack.
+  # .json files are read as JSON5, so comments and trailing commas in tsconfig
+  # and VS Code settings pass; syntax errors and duplicate keys fail.
+  - repo: https://github.com/simonvanlierde/jsonvet
+    rev: 022d320d5b971eccb28cfa6ce205152cbb382e53 # frozen: v3.2.0
+    hooks:
+      - id: jsonvet
+
+  # Formats first, so yamllint below sees the formatted file.
+  - repo: https://github.com/google/yamlfmt
+    rev: 21ca5323a9c87ee37a434e0ca908efc0a89daa07 # frozen: v0.21.0
+    hooks:
+      - id: yamlfmt
+        exclude: (^|/)pnpm-lock\.yaml$
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530 # frozen: v1.38.0
+    hooks:
+      - id: yamllint
+
+  # gitleaks' successor from the same authors. gitleaks takes security fixes only.
+  - repo: https://github.com/betterleaks/betterleaks
+    rev: 81aff7a638638aae3a659845d089043e1d8fe9ac # frozen: v1.9.0
+    hooks:
+      - id: betterleaks
+
+  # Audits .github/ for template injection, credential leakage, cache poisoning
+  # and impostor commits. Set GH_TOKEN to enable the audits that need the API;
+  # without it only the offline subset runs.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: c92afdf2c6ca336aaa8f39e2bd8d48f62dbd8e1f # frozen: v1.31.1
+    hooks:
+      - id: zizmor
+
+  # Checks what zizmor doesn't: unknown keys, bad `needs`, expression type errors,
+  # and shellcheck over every `run:` when shellcheck is on PATH. jactionlint is a
+  # maintained fork of actionlint that adds release, cache and concurrency checks.
+  - repo: https://github.com/jdx/jactionlint
+    rev: a65ab044e916760429068fe5794b8306abdfcbb9 # frozen: v2.3.0
+    hooks:
+      - id: jactionlint
+  - repo: https://github.com/rvben/rumdl-pre-commit
+    rev: eaeb8abc646954face3eb41726f085385410f761 # frozen: v0.3.1
+    hooks:
+      - id: rumdl
+        args: [--fix]
+
+  # Misspelt words in code, comments and docs. It fixes the ones it is sure of and
+  # fails, so you review the fix. List a word it must leave alone in _typos.toml.
+  - repo: https://github.com/crate-ci/typos
+    rev: 7f9d0819ca1c008ade73f4b41fa9d258d48f605b # frozen: v1.51.1
+    hooks:
+      - id: typos
+        # Copier writes the template's commit id here, and a hex id can spell a word
+        # typos rejects.
+        exclude: ^\.copier-answers\.yml$
+
+  # Dead relative links in Markdown and HTML. Offline, so a commit never waits on the
+  # network: the weekly links.yml checks the web links. lychee's own hook installs its
+  # binary with an unpinned install script, so this takes upstream's wheel from PyPI
+  # at an exact version instead.
+  - repo: local
+    hooks:
+      - id: lychee
+        name: lychee --offline
+        entry: lychee --no-progress --offline
+        language: python
+        additional_dependencies: [lychee-bin==0.24.2]
+        types_or: [markdown, html]
+        require_serial: true
+
+  # Everything CI's compose workflow runs, before a push leaves the machine.
+  - repo: local
+    hooks:
+      - id: just-check
         name: just check
         entry: just check
         language: system

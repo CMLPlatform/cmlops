@@ -1,33 +1,53 @@
+# Dependabot, the default `dependency_bot` answer: no app install, and it covers every
+# ecosystem here, including the `rev` pins in .pre-commit-config.yaml. You merge every PR:
+# merging them automatically needs a workflow with `contents: write` and, in a public repo,
+# where `main` asks for an approval, Actions allowed to approve PRs. For updates that merge
+# themselves, answer `dependency_bot=renovate` instead.
+#
+# `cooldown` holds a version update back until the release has been public for a
+# week, long enough for a compromised release to be caught and yanked. One number for
+# every ecosystem and every update type. Security updates ignore it.
+#
+# No docker ecosystem: it reads FROM lines only, and those tags are copier answers,
+# so its PRs would fight the next `copier update`. A Compose-only repo has no Dockerfile
+# and its images are yours, so it gets the docker-compose ecosystem below.
+# `commit-message` gives each PR a Conventional Commits title, `chore(deps): bump ...`, which
+# the pr-title workflow checks.
 version: 2
+
+# Actions and hook revs are all CI and dev tooling, so they share one weekly PR. Fewer
+# PRs means fewer branches to bring up to date, one after another, where main requires it.
+multi-ecosystem-groups:
+  actions-and-hooks:
+    schedule: {interval: weekly}
+    # Members of a group can't set commit-message; the group sets it for them.
+    commit-message: {prefix: chore, include: scope}
+
 updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    cooldown:
-      default-days: 7
-    groups:
-      actions:
-        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    multi-ecosystem-group: actions-and-hooks
+    patterns: ["*"]
+    cooldown: {default-days: 7}
 
-  # Image tags and digests in the compose files.
-  - package-ecosystem: "docker-compose"
-    directories: ["/mlflow", "/serve", "/tunnel"]
-    schedule:
-      interval: "weekly"
-    cooldown:
-      default-days: 7
-    groups:
-      images:
-        patterns: ["*"]
+  # Version updates only. Dependabot has no security updates for this ecosystem.
+  - package-ecosystem: pre-commit
+    directory: /
+    multi-ecosystem-group: actions-and-hooks
+    patterns: ["*"]
+    cooldown: {default-days: 7}
 
-  # The Cloudflare provider and its lock file.
-  - package-ecosystem: "terraform"
-    directory: "/infra"
-    schedule:
-      interval: "weekly"
-    cooldown:
-      default-days: 7
-    groups:
-      providers:
-        patterns: ["*"]
+  # The images the compose files name, tag and digest together. The root compose.yaml only
+  # includes the others, and serve/compose.yaml is run per job, so each directory is listed.
+  - package-ecosystem: docker-compose
+    directories: [/mlflow, /serve, /tunnel]
+    schedule: {interval: weekly}
+    cooldown: {default-days: 7}
+    commit-message: {prefix: chore, include: scope}
+
+  # The Cloudflare provider in infra/ and its lock file.
+  - package-ecosystem: terraform
+    directory: /infra
+    schedule: {interval: weekly}
+    cooldown: {default-days: 7}
+    commit-message: {prefix: chore, include: scope}

@@ -1,0 +1,38 @@
+name: compose
+
+# A Compose-only repo has no image to build: this validates compose.yaml and lints the
+# shell scripts, as `just check` does.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: compose
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `just secrets` scans the git history; a shallow clone would pass vacuously.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: just@1.59.0
+      # just/local.just adds the secrets, hygiene, infra and test checks. GitHub sets CI, so a
+      # skipped test fails the run.
+      - run: just check

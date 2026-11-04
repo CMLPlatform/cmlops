@@ -1,125 +1,122 @@
-# .env (from .env.example) holds the paths and ids the recipes below share with Docker Compose.
-set dotenv-load
+# Task runner: https://just.systems. `just` lists the recipes, `just <name>` runs one.
+#
+# `import?` skips a recipe file you did not scaffold. Recipes are prefixed
+# (`py-`, `ts-`, `rs-`, `go-`) because imports share one namespace, except the few only
+# one kind has, such as `pipeline` or `up`.
+import? 'just/python.just'
+import? 'just/ts.just'
+import? 'just/rust.just'
+import? 'just/go.just'
+import? 'just/docker.just'
 
-# Lint images, pinned by digest so CI and a laptop run the same tools.
-shellcheck := "koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d"
-shfmt := "mvdan/shfmt:v3.12.0@sha256:307d265ffd25ce832899ae17c93ed5062fc3375c514bba8f52cbf52792735c4d"
-actionlint := "rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667"
-zizmor := "ghcr.io/zizmorcore/zizmor:1.16.0@sha256:a6460f1b6fe3dc08e588d314e73563bdd218ee30c995a4be5e9ee5bd300391ce"
-gitleaks := "zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
-reuse := "fsfe/reuse:5.0.2@sha256:000c3fc0c3e39e95b36fa9966d0104ae0496571b7de7b9f0c889a66438581bda"
-tofu := "ghcr.io/opentofu/opentofu:1.12.3@sha256:a0766d12f07b43e66f2ed40d7a8babe97d581d20339c68ad0ab561737af9a5b3"
-
-run := "docker run --rm --user " + `id -u` + ":" + `id -g` + " -v " + justfile_directory() + ":/src:ro -w /src"
-
+# List the recipes (what a bare `just` runs).
 default:
     @just --list
 
-# Everything CI runs.
-check: lint hygiene compose-config infra test
+# The stack checks CI runs. `just hooks` runs the git hooks, which CI also runs.
+check:
+    @just docker-check
+    @just local-check
 
-lint:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mapfile -t sh < <({ git ls-files -z | xargs -0 grep -lE '^#!.*(ba)?sh' 2>/dev/null || true; git ls-files '*.sh'; } | sort -u)
-    if [ ${#sh[@]} -gt 0 ]; then
-      {{ run }} {{ shellcheck }} -x "${sh[@]}"
-      {{ run }} {{ shfmt }} -d -i 2 -ci "${sh[@]}"
-    fi
-    {{ run }} {{ actionlint }}
-    {{ run }} {{ zizmor }} --offline .github/workflows
-    {{ run }} {{ gitleaks }} git --no-banner /src
-    {{ run }} {{ reuse }} lint
+# Fix and format every stack here, as each stack's `fmt` recipe does.
+fmt:
+    @just docker-fmt
 
-# Tracked files hold no home directory paths and no email addresses but GitHub noreply and the
-# reserved example domains: a host's layout or a person's address does not belong in the repo.
-hygiene:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bad=0
-    if git grep -nE '/(home|Users)/[A-Za-z0-9_.-]'; then bad=1; fi
-    if git grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' |
-      grep -vE '@(users\.noreply\.github\.com|example\.(org|com|net))'; then bad=1; fi
-    [ "$bad" = 0 ] || { echo "error: home paths or email addresses in tracked files (above)" >&2; exit 1; }
-
-# The compose files parse with the example settings.
-compose-config:
-    docker compose --env-file .env.example config -q
-    CMLOPS_SERVE_MODEL=m CMLOPS_SERVE_NAME=n CMLOPS_SERVE_HF=/hf CMLOPS_SERVE_MODELS=/models docker compose -f serve/compose.yaml --profile vllm --profile llama config -q
-
-# infra/ is formatted, valid, and its plan tests pass on a mocked provider. A copy inside the
-# container keeps .terraform out of the clone; init needs the registry for the provider.
-infra:
-    docker run --rm --entrypoint sh -v {{ justfile_directory() }}/infra:/src:ro {{ tofu }} -c 'cp -R /src /work && cd /work && tofu fmt -check -recursive && tofu init -backend=false -input=false -lockfile=readonly >/dev/null && tofu validate -no-color && tofu test -no-color'
-
-# The tests in tests/; one that cannot run here (no Docker, not Linux) says SKIP and exits 77.
-# With CI set a skip fails the run, so CI cannot pass without running every test.
-test:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    rc=0 ran=() skipped=() failed=()
-    for t in tests/test-*.sh; do
-      bash "$t"
-      case $? in
-        0) ran+=("$t") ;;
-        77) skipped+=("$t") && [ -z "${CI:-}" ] || rc=1 ;;
-        *) failed+=("$t") && rc=1 ;;
-      esac
-    done
-    echo "tests: ${#ran[@]} passed, ${#skipped[@]} skipped${skipped[*]:+ (${skipped[*]})}, ${#failed[@]} failed${failed[*]:+ (${failed[*]})}"
-    [ -z "${CI:-}" ] || [ ${#skipped[@]} -eq 0 ] || echo "error: CI is set, and a skipped test counts as a failure there" >&2
-    exit "$rc"
-
-# Once per host, and again after `just token`: the MLflow store and the state dir owned by this
-# user, and a tunnel token only this user can read. Without a token only MLflow can start.
-setup:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    : "${CMLOPS_MLFLOW_STORE:?set it in .env}" "${CMLOPS_STATE:?set it in .env}" "${CMLOPS_UID:?set it in .env}"
-    [ "$CMLOPS_UID" = "$(id -u)" ] || { echo "error: CMLOPS_UID is $CMLOPS_UID in .env, but you are $(id -u)" >&2; exit 1; }
-    # Docker would create a missing bind-mount source as root.
-    mkdir -p "$CMLOPS_MLFLOW_STORE/artifacts"
-    mkdir -p "$CMLOPS_STATE" && chmod 700 "$CMLOPS_STATE"
-    token=$CMLOPS_STATE/tunnel-token
-    if [ ! -e "$token" ]; then
-      echo "no tunnel token at $token yet: only 'docker compose up -d --wait mlflow' will work until the tunnel is set up (README.md)."
-      exit 0
-    fi
-    [ -s "$token" ] || { echo "error: $token is empty. Run 'just token' (README.md)." >&2; exit 1; }
-    [ "$(stat -c %a "$token")" = 600 ] || { echo "error: $token must be mode 600: chmod 600 it." >&2; exit 1; }
-
-# OpenTofu on infra/, with everything private in $CMLOPS_STATE: the state, .terraform and terraform.tfvars.
-[positional-arguments]
-tofu *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    state=${CMLOPS_STATE:?set it in .env}
-    [ $# -gt 0 ] || { echo "usage: just tofu init|plan|apply|output|... [args]" >&2; exit 2; }
-    mkdir -p "$state" && chmod 700 "$state"
-    umask 077
-    export TF_DATA_DIR=$state/.terraform
-    sub=$1
-    shift
-    case $sub in
-      init) extra=(-backend-config="path=$state/terraform.tfstate") ;;
-      plan | apply | destroy | import | refresh | console) extra=(-var-file="$state/terraform.tfvars") ;;
-      *) extra=() ;;
-    esac
-    exec tofu -chdir=infra "$sub" "${extra[@]}" "$@"
-
-# Writes the connector's token to $CMLOPS_STATE/tunnel-token, mode 600.
-token:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    token=${CMLOPS_STATE:?set it in .env}/tunnel-token
-    umask 077
-    just tofu output -raw tunnel_token >"$token.tmp"
-    mv "$token.tmp" "$token"
-    echo "wrote $token; restart the connector with 'docker compose up -d --force-recreate cloudflared' if it runs"
-
-# Staged diff only, for the pre-commit hook.
-_gitleaks-staged:
-    git diff --cached | docker run --rm -i {{ gitleaks }} stdin --no-banner
-
+# Run every git hook over the whole repo, not just staged files. The checks workflow skips
+# the hooks in its SKIP list, which the stack workflows run instead. Here they all run, so
+# this can fail where the checks workflow passes.
 hooks:
-    prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+    prek run -a
+
+# Release X.Y.Z. First run: cut CHANGELOG's [Unreleased] into [X.Y.Z] and commit it; merge that to main. Second run, on up-to-date main: sign and push tag vX.Y.Z.
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version={{ version }}
+    [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a version: $version" >&2; exit 1; }
+    tag=v$version
+    repo=https://github.com/CMLPlatform/cmlops
+    git fetch --quiet origin main
+    # Not grep -q: it stops reading early, and under pipefail git show then fails on a
+    # changelog bigger than the pipe buffer.
+    if git show origin/main:CHANGELOG.md | grep "^## \[$version\] - " >/dev/null; then
+        .github/scripts/tag-release.sh "$version"
+        exit 0
+    fi
+    prev=$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' CHANGELOG.md | head -1)
+    if [ -n "$prev" ]; then link=$repo/compare/v$prev...$tag; else link=$repo/releases/tag/$tag; fi
+    tmp=$(mktemp)
+    trap 'rm -f "$tmp"' EXIT
+    awk -v v="$version" -v d="$(date +%F)" -v repo="$repo" -v link="$link" '
+        /^## \[Unreleased\]/ && !h { print; print ""; print "## [" v "] - " d; h = 1; next }
+        /^\[Unreleased\]: / { print "[Unreleased]: " repo "/compare/v" v "...HEAD"; print "[" v "]: " link; l = 1; next }
+        { print }
+        END { if (!h) exit 1; if (!l) { print ""; print "[Unreleased]: " repo "/compare/v" v "...HEAD"; print "[" v "]: " link } }
+    ' CHANGELOG.md >"$tmp" || { echo "CHANGELOG.md has no [Unreleased] section" >&2; exit 1; }
+    .github/scripts/release-notes.sh "$tag" "$tmp" >/dev/null || { echo "[Unreleased] has no entries to release" >&2; exit 1; }
+    cp "$tmp" CHANGELOG.md
+    git add CHANGELOG.md
+    git commit -s -m "chore: release $version" -- CHANGELOG.md
+    echo "Merge this commit to main, then run: just release $version"
+
+# Protect the default branch (no deletion, no force-push, linear history, PRs squash-merged after the always-on checks pass and one approval) and the v* tags. Turn on private vulnerability reporting, CodeQL default setup and Dependabot alerts. Safe to rerun.
+repo-settings:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    err=$(mktemp)
+    trap 'rm -f "$err"' EXIT
+    fail() {
+        cat "$err" >&2
+        grep -qE 'HTTP (403|404)' "$err" && echo "Rulesets on a private repo need a paid GitHub plan (or the repo does not exist, or you lack admin rights)." >&2
+        exit 1
+    }
+    # Merge-method switches live on the repo itself; the ruleset also limits the PR button.
+    gh api -X PATCH repos/{owner}/{repo} -F allow_squash_merge=true -F allow_merge_commit=false -F allow_rebase_merge=false -F delete_branch_on_merge=true -F web_commit_signoff_required=true >/dev/null 2>"$err" || fail
+    # Adopt an existing ruleset by name, else one with the same target that protects the same
+    # refs as the file, updating it in place. The list has no conditions, so each candidate is read.
+    for name in main main-checks tags; do
+        file=.github/rulesets/$name.json
+        case "$name" in
+            main) want='["~DEFAULT_BRANCH"]' filter='.[] | select(.target == "branch" and (.name | test("checks?") | not)) | .id' ;;
+            main-checks) want='["~DEFAULT_BRANCH"]' filter='.[] | select(.target == "branch" and (.name | test("checks?"))) | .id' ;;
+            tags) want='["refs/tags/v*"]' filter='.[] | select(.target == "tag") | .id' ;;
+        esac
+        id=$(gh api "repos/{owner}/{repo}/rulesets?includes_parents=false" --jq "first(.[] | select(.name == \"$name\") | .id) // empty" 2>"$err") || fail
+        if [ -z "$id" ]; then
+            candidates=$(gh api "repos/{owner}/{repo}/rulesets?includes_parents=false" --jq "$filter" 2>"$err") || fail
+            for candidate in $candidates; do
+                same=$(gh api "repos/{owner}/{repo}/rulesets/$candidate" --jq ".conditions.ref_name.include == $want" 2>"$err") || fail
+                if [ "$same" = true ]; then
+                    id=$candidate
+                    break
+                fi
+            done
+        fi
+        if [ -n "$id" ]; then
+            gh api -X PUT "repos/{owner}/{repo}/rulesets/$id" --input "$file" >"$err" 2>&1 || fail
+            echo "Updated ruleset '$name' ($id)."
+        else
+            # gh prints GitHub's reason for a refusal on stdout, so fail() needs both.
+            gh api -X POST repos/{owner}/{repo}/rulesets --input "$file" >"$err" 2>&1 || fail
+            echo "Created ruleset '$name'."
+        fi
+    done
+    # SECURITY.md sends reports to a private security advisory, which this turns on.
+    gh api -X PUT repos/{owner}/{repo}/private-vulnerability-reporting >/dev/null 2>"$err" || fail
+    echo "Turned on private vulnerability reporting."
+    # CodeQL default setup scans every PR and push to main.
+    if gh api -X PATCH repos/{owner}/{repo}/code-scanning/default-setup -f state=configured >"$err" 2>&1; then
+        echo "Turned on CodeQL default setup."
+    else
+        echo "Warning: CodeQL default setup could not be turned on, so code scanning stays off: $(cat "$err")" >&2
+    fi
+    # Dependabot alerts let Renovate open security PRs and turn on the dependency graph.
+    gh api -X PUT repos/{owner}/{repo}/vulnerability-alerts >/dev/null 2>"$err" || fail
+    echo "Turned on Dependabot alerts."
+
+# Set the GitHub About box from your answers: description and a topic per stack. Adds topics, never removes yours. Safe to rerun.
+repo-about:
+    gh repo edit --description 'The ML stack of a single GPU node at CML: a GPU queue, model serving behind a standard chat-completions HTTP API, one MLflow tracking server, a Cloudflare tunnel behind Access, and the host'\''s telemetry as a spoke of CML monitoring.' --add-topic docker
+
+# A repo's own recipes that copier updates never touch:
+import? 'just/local.just'

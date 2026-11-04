@@ -13,9 +13,9 @@ host's telemetry as a spoke of [CML monitoring](https://github.com/CMLPlatform/m
 | `infra/`       | OpenTofu: the tunnel, its DNS records and Access                                 |
 | `serve/`       | The model servers `cmlops serve` starts per job, outside the root `compose.yaml` |
 | `tests/`       | Shell tests, run by `just check`                                                 |
-| `justfile`     | `just setup`, `just tofu`, `just token` and `just check`                         |
+| `justfile`     | `just check` and the template's recipes; `just/local.just` has `setup`, `tofu`, `token` |
 | `.env.example` | The settings Docker Compose and `just` read, to copy to `.env`                   |
-| `.github/`     | CI, which runs `just check`, and Dependabot                                      |
+| `.github/`     | CI (the compose workflow runs `just check`, the checks workflow the git hooks) and Dependabot |
 
 ## Deploying
 
@@ -198,15 +198,16 @@ connector picks up the new route on its own, since the tunnel is managed from Cl
 
   The new tunnel gets a new ID, and the DNS records follow it in the same apply.
 
-## Checks
+## Development
 
 ```sh
-just check   # lint, hygiene, compose config, tofu fmt/validate/test and tests/
-just hooks   # installs the git hooks (prek)
+just check     # compose config, shell lint, secrets in history, hygiene, tofu fmt/validate/test and tests/
+prek install   # the git hooks: file checks and linters on commit, the message on commit, `just check` on push
+just hooks     # every git hook over the whole repo, as the checks workflow does
 ```
 
 The linters and OpenTofu run in pinned containers, so `just check` needs Docker, and network
-access for the images and for `tofu init` to fetch the provider. `just hooks` needs prek. A test
+access for the images and for `tofu init` to fetch the provider. The hooks need prek. A test
 that cannot run on the machine (no Docker, not Linux) prints SKIP and does not fail, except when
 `CI` is set, as GitHub Actions does: there a skip fails the run.
 
