@@ -205,8 +205,8 @@ just hooks   # installs the git hooks (prek)
 ```
 
 The linters and OpenTofu run in pinned containers, so `just check` needs Docker, and network
-access for the images and for `tofu init` to fetch the provider. `just hooks` needs prek. A test that cannot run on the machine (no
-Docker, not Linux) prints SKIP and does not fail.
+access for the images and for `tofu init` to fetch the provider. `just hooks` needs prek. A test that cannot run on the machine (no Docker, not Linux) prints SKIP and does not fail,
+except when `CI` is set, as GitHub Actions does: there a skip fails the run.
 
 ## Licence
 

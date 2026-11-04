@@ -1,6 +1,9 @@
 # shellcheck shell=bash
 # Helpers the tests share. Sourced, never executed. A test exits 77 when it skips.
 
+# A test run inside a served job or a gate would inherit its settings and markers.
+unset "${!CMLOPS_GATE_@}" "${!CMLOPS_SERVE_@}"
+
 # The checkout these tests live in, always: an inherited REPO_ROOT would point them at another tree.
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 

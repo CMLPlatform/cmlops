@@ -144,6 +144,11 @@ wait "$holder" 2>/dev/null || true
 [[ $(tail -1 "$SCRATCH/helper.log") == "bench off" ]] || fail "a stopped quiet gate did not call bench off"
 [[ $(try cpu) == 0 ]] || fail "lock held after a stopped quiet gate"
 
-if bash "$cmlops" gate bogus -- true 2>/dev/null; then fail "accepted an unknown mode"; fi
-if bash "$cmlops" gate cpu 2>/dev/null; then fail "ran without a command"; fi
+# Each bad form is a usage error, exit 2, not any failure.
+for bad in "bogus -- true" "cpu" "cpu --wait abc -- true" "cpu --wait" "cpu --bogus -- true"; do
+  rc=0
+  # shellcheck disable=SC2086 # each case is a word list
+  bash "$cmlops" gate $bad 2>/dev/null || rc=$?
+  [[ $rc == 2 ]] || fail "'gate $bad' exited $rc, not 2"
+done
 echo 'OK: cmlops gate locks'

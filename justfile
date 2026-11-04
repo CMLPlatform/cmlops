@@ -53,14 +53,21 @@ infra:
     docker run --rm --entrypoint sh -v {{ justfile_directory() }}/infra:/src:ro {{ tofu }} -c 'cp -R /src /work && cd /work && tofu fmt -check -recursive && tofu init -backend=false -input=false -lockfile=readonly >/dev/null && tofu validate -no-color && tofu test -no-color'
 
 # The tests in tests/; one that cannot run here (no Docker, not Linux) says SKIP and exits 77.
+# With CI set a skip fails the run, so CI cannot pass without running every test.
 test:
     #!/usr/bin/env bash
     set -uo pipefail
-    rc=0
+    rc=0 ran=() skipped=() failed=()
     for t in tests/test-*.sh; do
       bash "$t"
-      case $? in 0 | 77) ;; *) rc=1 && echo "FAIL: $t" >&2 ;; esac
+      case $? in
+        0) ran+=("$t") ;;
+        77) skipped+=("$t") && [ -z "${CI:-}" ] || rc=1 ;;
+        *) failed+=("$t") && rc=1 ;;
+      esac
     done
+    echo "tests: ${#ran[@]} passed, ${#skipped[@]} skipped${skipped[*]:+ (${skipped[*]})}, ${#failed[@]} failed${failed[*]:+ (${failed[*]})}"
+    [ -z "${CI:-}" ] || [ ${#skipped[@]} -eq 0 ] || echo "error: CI is set, and a skipped test counts as a failure there" >&2
     exit "$rc"
 
 # Once per host, and again after `just token`: the MLflow store and the state dir owned by this

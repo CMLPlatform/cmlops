@@ -1,10 +1,10 @@
 #!/bin/bash
 # The MLflow service from the root compose.yaml, as its own project on a scratch store and a free
-# port: `just setup` creates the store, the container turns healthy, /health answers on the
-# published port, only the configured public host gets past the Host-header check, a run with an
-# artifact logged over HTTP reads back through the server, the artifact lands in the store owned
-# by the user, the restart policy is unless-stopped, and down removes it. Without a running
-# Docker it skips.
+# port: `just setup` creates the store, the container turns healthy, /health answers on a port
+# published on 127.0.0.1 only, only the configured public host gets past the Host-header check
+# (another gets a 4xx), a run with an artifact logged over HTTP reads back through the server,
+# the artifact lands in the store owned by the user, the restart policy is unless-stopped, and
+# down removes it. Without a running Docker it skips.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -32,7 +32,8 @@ mkdir -p "$CMLOPS_STATE"
 [[ $(curl -s --max-time 5 "$url/health") == OK ]] || fail "/health did not answer OK"
 code() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $1" "$url/api/2.0/mlflow/experiments/search?max_results=1"; }
 [[ $(code "$CMLOPS_MLFLOW_HOST") == 200 ]] || fail "the public host was refused"
-[[ $(code other.example.com) != 200 ]] || fail "another host got past the Host-header check"
+foreign=$(code other.example.com)
+[[ $foreign == 4?? ]] || fail "another host got $foreign, not a 4xx refusal"
 
 # The client runs in the server's image and talks HTTP to the server, as any project would.
 out=$("${dc[@]}" exec -T -e MLFLOW_TRACKING_URI=http://127.0.0.1:5000 mlflow python -c '
@@ -55,6 +56,10 @@ art=$(echo "$SCRATCH"/store/artifacts/1/*/artifacts/a.txt)
   fail "the store is not owned by $(id -un)"
 [[ $(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$project-mlflow-1") == unless-stopped ]] ||
   fail "the restart policy is not unless-stopped"
+# MLflow has no login: Access is its only gate, as long as nothing but loopback reaches the port.
+# shellcheck disable=SC2016 # a Go template, not a shell expansion
+host_ip=$(docker inspect -f '{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostIp}}' "$project-mlflow-1")
+[[ $host_ip == 127.0.0.1 ]] || fail "MLflow is published on '$host_ip', not 127.0.0.1"
 
 "${dc[@]}" down >/dev/null 2>&1 || fail "down failed"
 ! curl -s --max-time 2 "$url/health" >/dev/null || fail "the server still answers after down"
