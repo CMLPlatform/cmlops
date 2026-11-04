@@ -19,12 +19,32 @@ spoke of [CML monitoring](https://github.com/CMLPlatform/monitoring).
 The node runs the stack from a clone of this repo. Nothing else on the host needs to know it
 exists beyond `bin/cmlops` on PATH and the tracking URI its users set.
 
+The host needs Docker Engine with the Compose plugin, `just`, OpenTofu (`just tofu` runs it on the
+host; only the `just infra` check uses a container), `flock`, `curl` and bash 4 or later.
+
 1. `cp .env.example .env` and fill it in. Docker Compose and `just` both read it.
 2. Set up the tunnel once (below), so `$CMLOPS_STATE/tunnel-token` exists.
 3. `just setup` creates the MLflow store and the state dir as you, and checks the token file.
 4. `docker compose up -d --wait`. The services come back on their own after a crash or a reboot,
    until `docker compose down`.
 5. `ln -s "$PWD/bin/cmlops" ~/.local/bin/cmlops`, or into any other directory on PATH.
+
+To run MLflow before the tunnel exists, skip step 2: `just setup` then creates the dirs, says
+there is no token yet and exits 0, and `docker compose up -d --wait mlflow` starts MLflow alone.
+Run `just setup` and the full `docker compose up -d --wait` once the token is there.
+
+### Moving an existing setup
+
+To take over a node that already runs MLflow and a tunnel from elsewhere:
+
+1. Stop whatever holds the MLflow port, and any connector that runs for the same tunnel.
+2. Point `CMLOPS_STATE` at the existing state dir, or move `terraform.tfstate`, `terraform.tfvars`
+   and `tunnel-token` into it.
+3. Run `just tofu init -reconfigure`, then `just tofu plan`. The plan must show no changes before
+   any apply: an apply against empty state creates a second tunnel and DNS records that clash
+   with the existing ones.
+4. Keep the existing store path in `CMLOPS_MLFLOW_STORE`.
+5. Then `just setup` and `docker compose up -d --wait`.
 
 Every service binds to 127.0.0.1 only; the tunnel with Access is the only way in from outside.
 Images are pinned by tag and digest, and Dependabot bumps them.

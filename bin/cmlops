@@ -46,6 +46,9 @@ usage() {
 # clocks and GPU power and moves other work off CPUS (CMLOPS_GATE_CPUS, default 16-23);
 # `bench off` undoes it on exit. A host without the helper skips this. The helper should also
 # undo it on its own once no quiet gate holds LOCK, to recover from a crash.
+# LOCK is $dir/gate.lock, with $dir from CMLOPS_GATE_DIR or $XDG_RUNTIME_DIR/cmlops-gate, and the
+# helper must accept that path. A helper that refuses it fails `bench on`: the quiet run then goes
+# ahead without bench mode, and only a line on stderr says so.
 gate() {
   local mode=${1:-}
   case $mode in quiet | gpu | cpu) shift ;; *) usage ;; esac
@@ -150,7 +153,7 @@ gate() {
     bench=1 # restore even after a failed on, which may have got half way
     # stderr: a remote caller may stream the job's stdout back.
     sudo -n "$helper" bench on "${CMLOPS_GATE_CPUS:-16-23}" "$dir/gate.lock" "${parent_quiet:-$$}" >&2 ||
-      echo "cmlops gate: '$helper bench on' failed; running without quiet mode" >&2
+      echo "cmlops gate: '$helper bench on' failed; running without bench mode, so timings from this run are not isolated" >&2
   fi
 
   [ "$mode" != quiet ] || export CMLOPS_GATE_ACTIVE_CPUS=${CMLOPS_GATE_CPUS:-16-23}

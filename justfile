@@ -64,7 +64,7 @@ test:
     exit "$rc"
 
 # Once per host, and again after `just token`: the MLflow store and the state dir owned by this
-# user, and a tunnel token only this user can read.
+# user, and a tunnel token only this user can read. Without a token only MLflow can start.
 setup:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -74,7 +74,11 @@ setup:
     mkdir -p "$CMLOPS_MLFLOW_STORE/artifacts"
     mkdir -p "$CMLOPS_STATE" && chmod 700 "$CMLOPS_STATE"
     token=$CMLOPS_STATE/tunnel-token
-    [ -s "$token" ] || { echo "error: no tunnel token at $token. Apply infra/ and run 'just token' first (README.md)." >&2; exit 1; }
+    if [ ! -e "$token" ]; then
+      echo "no tunnel token at $token yet: only 'docker compose up -d --wait mlflow' will work until the tunnel is set up (README.md)."
+      exit 0
+    fi
+    [ -s "$token" ] || { echo "error: $token is empty. Run 'just token' (README.md)." >&2; exit 1; }
     [ "$(stat -c %a "$token")" = 600 ] || { echo "error: $token must be mode 600: chmod 600 it." >&2; exit 1; }
 
 # OpenTofu on infra/, with everything private in $CMLOPS_STATE: the state, .terraform and terraform.tfvars.
