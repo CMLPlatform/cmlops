@@ -1,0 +1,7 @@
+.env
+*.local.yml
+*.local.yaml
+.terraform/
+*.tfstate*
+*.tfvars
+!*.tfvars.example
