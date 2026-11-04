@@ -17,8 +17,9 @@ x-common: &common
     SERVE_ARGS: ${CMLOPS_SERVE_ARGS:-}
   volumes:
     # Hugging Face snapshots are symlinks into a shared blob store, so the cache mounts at its own path.
-    - ${CMLOPS_SERVE_HF:-/nonexistent}:${CMLOPS_SERVE_HF:-/nonexistent}:ro
-    - ${CMLOPS_SERVE_MODELS:-/nonexistent}:${CMLOPS_SERVE_MODELS:-/nonexistent}:ro
+    # `cmlops serve` sets both; a missing source would be created as root.
+    - ${CMLOPS_SERVE_HF:?the Hugging Face cache}:${CMLOPS_SERVE_HF}:ro
+    - ${CMLOPS_SERVE_MODELS:?the models dir}:${CMLOPS_SERVE_MODELS}:ro
   ports:
     - 127.0.0.1:${CMLOPS_SERVE_PORT:-8000}:8000
 

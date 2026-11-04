@@ -20,6 +20,7 @@ cat >"$SCRATCH/docker" <<EOF
 #!/bin/bash
 args=" \$* "
 echo "\$CMLOPS_SERVE_PROJECT \$CMLOPS_SERVE_MODEL \$*" >>"$SCRATCH/calls"
+echo "\$CMLOPS_SERVE_MODELS" >"$SCRATCH/models"
 case \$args in
 *" up "*)
   [ -n "\${FAKE_DEAD:-}" ] && exit 0
@@ -48,6 +49,9 @@ out=$(run vllm /m/snap m -- sh -c 'echo "$CMLOPS_SERVE_URL $CMLOPS_SERVE_NAME $C
 grep -q '^gate gpu$' "$SCRATCH/calls" || fail "did not go through the gpu gate: $(cat "$SCRATCH/calls")"
 grep -q 'tmp-serve-[0-9]* /m/snap .*--profile vllm up' "$SCRATCH/calls" || fail "up call: $(cat "$SCRATCH/calls")"
 grep -q ' down ' "$SCRATCH/calls" || fail "the server was not removed"
+# Without CMLOPS_SERVE_MODELS the models dir is the clone's serve/models, which exists.
+[[ $(cat "$SCRATCH/models") == "$REPO_ROOT/serve/models" && -d $REPO_ROOT/serve/models ]] ||
+  fail "the default models dir is '$(cat "$SCRATCH/models")'"
 ! curl -sf "http://127.0.0.1:$port/v1/models" >/dev/null || fail "the server still answers after the run"
 
 rc=0

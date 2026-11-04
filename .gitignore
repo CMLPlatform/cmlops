@@ -1,4 +1,6 @@
 .env
+serve/models/*
+!serve/models/.gitkeep
 *.local.yml
 *.local.yaml
 .terraform/

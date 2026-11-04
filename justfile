@@ -45,7 +45,7 @@ hygiene:
 # The compose files parse with the example settings.
 compose-config:
     docker compose --env-file .env.example config -q
-    CMLOPS_SERVE_MODEL=m CMLOPS_SERVE_NAME=n docker compose -f serve/compose.yaml --profile vllm --profile llama config -q
+    CMLOPS_SERVE_MODEL=m CMLOPS_SERVE_NAME=n CMLOPS_SERVE_HF=/hf CMLOPS_SERVE_MODELS=/models docker compose -f serve/compose.yaml --profile vllm --profile llama config -q
 
 # infra/ is formatted, valid, and its plan tests pass on a mocked provider. A copy inside the
 # container keeps .terraform out of the clone; init needs the registry for the provider.

@@ -177,7 +177,8 @@ gate() {
 # serve: a model behind a chat-completions API for the length of one command, then removed.
 #
 #   MODEL  a Hugging Face snapshot dir (vllm) or a GGUF file (llama), on a path the container sees:
-#          under CMLOPS_SERVE_HF (default ~/.cache/huggingface) or CMLOPS_SERVE_MODELS
+#          under CMLOPS_SERVE_HF (default ~/.cache/huggingface) or CMLOPS_SERVE_MODELS (default
+#          serve/models in this clone)
 #   NAME   the model name the API serves it under
 #   CMD    runs once the server answers, with CMLOPS_SERVE_URL (http://127.0.0.1:PORT/v1),
 #          CMLOPS_SERVE_NAME and CMLOPS_SERVE_IMAGE (the pinned image, for a run's manifest) set.
@@ -211,6 +212,7 @@ serve() {
   export CMLOPS_SERVE_PROJECT=tmp-serve-$$ CMLOPS_SERVE_MODEL=$model CMLOPS_SERVE_NAME=$name CMLOPS_SERVE_PORT=$port
   CMLOPS_SERVE_UID=$(id -u) CMLOPS_SERVE_GID=$(id -g)
   export CMLOPS_SERVE_HF=${CMLOPS_SERVE_HF:-$HOME/.cache/huggingface} CMLOPS_SERVE_UID CMLOPS_SERVE_GID
+  export CMLOPS_SERVE_MODELS=${CMLOPS_SERVE_MODELS:-$root/serve/models}
   compose=("$docker" compose -f "$root/serve/compose.yaml" --profile "$engine")
   local url=http://127.0.0.1:$port/v1
 

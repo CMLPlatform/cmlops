@@ -72,8 +72,12 @@ for the length of one command:
 ```sh
 cmlops serve vllm ~/.cache/huggingface/hub/models--Qwen--Qwen3.5-9B/snapshots/<rev> qwen3.5-9b \
   -- python label.py   # label.py reads CMLOPS_SERVE_URL and CMLOPS_SERVE_NAME
-CMLOPS_SERVE_ARGS='--n-cpu-moe 20' cmlops serve llama /models/lfm2.5-24b-a2b-q4_k_m.gguf lfm -- ...
+CMLOPS_SERVE_MODELS=/srv/models CMLOPS_SERVE_ARGS='--n-cpu-moe 20' \
+  cmlops serve llama /srv/models/lfm2.5-24b-a2b-q4_k_m.gguf lfm -- ...
 ```
+
+MODEL is an absolute path under `CMLOPS_SERVE_HF` (default `~/.cache/huggingface`) or `CMLOPS_SERVE_MODELS`
+(default `serve/models` in this clone, which git ignores): only those two are mounted.
 
 It goes through `cmlops gate gpu`, starts the engine from `serve/compose.yaml` under a throwaway
 `tmp-serve-<pid>` project, waits until `/v1/models` answers, and runs CMD with `CMLOPS_SERVE_URL`,
