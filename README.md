@@ -1,8 +1,8 @@
 # cmlops
 
 The ML stack of a single GPU node at CML: a GPU queue, model serving behind a standard
-chat-completions HTTP API, one MLflow tracking server, a Cloudflare tunnel behind Access, and the host's telemetry as a
-spoke of [CML monitoring](https://github.com/CMLPlatform/monitoring).
+chat-completions HTTP API, one MLflow tracking server, a Cloudflare tunnel behind Access, and the
+host's telemetry as a spoke of [CML monitoring](https://github.com/CMLPlatform/monitoring).
 
 | Path           | What it is                                                                       |
 | -------------- | -------------------------------------------------------------------------------- |
@@ -84,8 +84,9 @@ CMLOPS_SERVE_MODELS=/srv/models CMLOPS_SERVE_ARGS='--n-cpu-moe 20' \
   cmlops serve llama /srv/models/lfm2.5-24b-a2b-q4_k_m.gguf lfm -- ...
 ```
 
-MODEL is an absolute path under `CMLOPS_SERVE_HF` (default `~/.cache/huggingface`) or `CMLOPS_SERVE_MODELS`
-(default `serve/models` in this clone, which git ignores): only those two are mounted.
+MODEL is an absolute path under `CMLOPS_SERVE_HF` (default `~/.cache/huggingface`) or
+`CMLOPS_SERVE_MODELS` (default `serve/models` in this clone, which git ignores): only those two
+are mounted.
 
 It goes through `cmlops gate gpu`, starts the engine from `serve/compose.yaml` under a throwaway
 `tmp-serve-<pid>` project, waits until `/v1/models` answers, and runs CMD with `CMLOPS_SERVE_URL`,
@@ -205,8 +206,9 @@ just hooks   # installs the git hooks (prek)
 ```
 
 The linters and OpenTofu run in pinned containers, so `just check` needs Docker, and network
-access for the images and for `tofu init` to fetch the provider. `just hooks` needs prek. A test that cannot run on the machine (no Docker, not Linux) prints SKIP and does not fail,
-except when `CI` is set, as GitHub Actions does: there a skip fails the run.
+access for the images and for `tofu init` to fetch the provider. `just hooks` needs prek. A test
+that cannot run on the machine (no Docker, not Linux) prints SKIP and does not fail, except when
+`CI` is set, as GitHub Actions does: there a skip fails the run.
 
 ## Licence
 
