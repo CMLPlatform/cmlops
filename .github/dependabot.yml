@@ -1,6 +1,5 @@
 version: 2
 updates:
-  # docker-compose and terraform entries arrive with the components.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -9,4 +8,26 @@ updates:
       default-days: 7
     groups:
       actions:
+        patterns: ["*"]
+
+  # Image tags and digests in the compose files.
+  - package-ecosystem: "docker-compose"
+    directories: ["/mlflow", "/serve", "/tunnel"]
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      images:
+        patterns: ["*"]
+
+  # The Cloudflare provider and its lock file.
+  - package-ecosystem: "terraform"
+    directory: "/infra"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      providers:
         patterns: ["*"]
