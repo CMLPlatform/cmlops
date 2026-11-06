@@ -20,6 +20,8 @@ _shell-files:
     set -euo pipefail
     git ls-files -z | while IFS= read -r -d '' f; do
         [ -f "$f" ] || continue
+        # NOTE: a vendored file (.gitattributes) keeps its upstream format; upstream checks it.
+        [ "$(git check-attr linguist-vendored -- "$f")" = "$f: linguist-vendored: set" ] && continue
         case $f in *.sh) printf '%s\0' "$f"; continue ;; esac
         if head -n1 "$f" | grep -qE '^#!.*/(env +)?(ba|da|k)?sh( |$)'; then printf '%s\0' "$f"; fi
     done

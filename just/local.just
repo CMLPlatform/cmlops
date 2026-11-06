@@ -31,9 +31,11 @@ hygiene:
       grep -vE '@(users\.noreply\.github\.com|example\.(org|com|net))|info@r9lab\.io'; then bad=1; fi
     [ "$bad" = 0 ] || { echo "error: home paths or email addresses in tracked files (above)" >&2; exit 1; }
 
-# The per-job serve compose file parses with every profile (docker-check covers compose.yaml).
+# The per-job serve compose file parses with every profile, and compose.yaml with the telemetry
+# overlays (docker-check covers compose.yaml alone).
 compose-config:
     CMLOPS_SERVE_MODEL=m CMLOPS_SERVE_NAME=n CMLOPS_SERVE_HF=/hf CMLOPS_SERVE_MODELS=/models docker compose -f serve/compose.yaml --profile vllm --profile llama config -q
+    PROJECT=cmlops ENVIRONMENT=prod OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.org OTLP_AUTH_TOKEN=t docker compose --env-file .env.example -f compose.yaml -f compose.telemetry.yml -f compose.telemetry.gpu.yml config -q
 
 # infra/ is formatted, valid, and its plan tests pass on a mocked provider. A copy inside the
 # container keeps .terraform out of the clone; init needs the registry for the provider.

@@ -1,0 +1,6 @@
+# Vendored by the CML overlay (.copier-answers.cml.yml) and checked in CMLPlatform/monitoring.
+# `copier update --answers-file .copier-answers.cml.yml` replaces them; never edit them here.
+compose.telemetry.yml linguist-vendored
+compose.telemetry.gpu.yml linguist-vendored
+deploy/alloy/config.alloy linguist-vendored
+scripts/run_scheduled.sh linguist-vendored

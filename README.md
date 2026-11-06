@@ -129,6 +129,28 @@ docker compose exec mlflow mlflow gc --backend-store-uri sqlite:////mlflow/mlflo
 
 Without `--run-ids`, `gc` purges every soft-deleted run in the store.
 
+## Telemetry
+
+The node is a spoke of the CML monitoring hub ([CMLPlatform/monitoring](https://github.com/CMLPlatform/monitoring)).
+Its files come from the hub's CML overlay, a Copier template with its own answers in
+`.copier-answers.cml.yml`: `compose.telemetry.yml` (the Alloy agent), `compose.telemetry.gpu.yml`
+(the GPU exporter), `deploy/alloy/config.alloy` and `scripts/run_scheduled.sh`. Never edit them
+here; a monitoring release reaches them as
+
+```sh
+copier update --answers-file .copier-answers.cml.yml
+```
+
+To turn it on, add the lines from `telemetry.env.example` to `.env`, with the hub's ingest token
+in `OTLP_AUTH_TOKEN`, and add the overlays to the compose files:
+
+```sh
+COMPOSE_FILE=compose.yaml:compose.telemetry.yml:compose.telemetry.gpu.yml
+```
+
+The hub operator runs `./bootstrap.sh cmlops prod` there first, which provisions the alert that
+fires when the node goes silent.
+
 ## Tunnel
 
 A Cloudflare tunnel publishes the node's web UIs behind Cloudflare Access, so a browser opens
