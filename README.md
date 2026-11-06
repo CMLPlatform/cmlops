@@ -132,17 +132,27 @@ Without `--run-ids`, `gc` purges every soft-deleted run in the store.
 ## Telemetry
 
 The node is a spoke of the CML monitoring hub ([CMLPlatform/monitoring](https://github.com/CMLPlatform/monitoring)).
-Its files come from the hub's CML overlay, a Copier template with its own answers in
-`.copier-answers.cml.yml`: `compose.telemetry.yml` (the Alloy agent), `compose.telemetry.gpu.yml`
-(the GPU exporter), `deploy/alloy/config.alloy` and `scripts/run_scheduled.sh`. Never edit them
-here; a monitoring release reaches them as
+Its files come from the hub's CML overlay, two Copier templates applied on top of this repo's
+own, each with its own answers file:
+
+- The project layer (`.copier-answers.cml.yml`): `scripts/run_scheduled.sh` and
+  `telemetry.env.example`, cmlops's own settings.
+- The host layer (`.copier-answers.cml-host.yml`): the machine's one telemetry agent,
+  `compose.telemetry.yml` (Alloy), `compose.telemetry.gpu.yml` (the GPU exporter), `deploy/alloy/`
+  and `telemetry-host.env.example`. Its `stacks` answer names the Compose projects whose containers
+  the agent ships; today only `cmlops`. The host layer belongs to whichever repo owns the machine.
+  It lives here because cmlops is the node's only stack from a template, and it moves out with
+  the node if cmlops moves to another one.
+
+Never edit these files here; a monitoring release reaches each layer as
 
 ```sh
 copier update --answers-file .copier-answers.cml.yml
+copier update --answers-file .copier-answers.cml-host.yml
 ```
 
-To turn it on, add the lines from `telemetry.env.example` to `.env`, with the hub's ingest token
-in `OTLP_AUTH_TOKEN`, and add the overlays to the compose files:
+To turn it on, add the lines from both `*.env.example` files to `.env`, with the hub's ingest
+token in `OTLP_AUTH_TOKEN`, and add the overlays to the compose files:
 
 ```sh
 COMPOSE_FILE=compose.yaml:compose.telemetry.yml:compose.telemetry.gpu.yml

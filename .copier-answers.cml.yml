@@ -1,9 +1,9 @@
 # Managed by copier (the CML overlay from CMLPlatform/monitoring). Do not edit by hand.
 # Run: copier update --answers-file .copier-answers.cml.yml
-_commit: v0.5.0-2-g1f86d3d
+_commit: v0.5.0-3-gdb9c173
 _src_path: gh:CMLPlatform/monitoring
 contact: ''
 env: prod
-gpu: true
+layer: project
 otlp_endpoint: https://otel.cml-relab.org
 project: cmlops

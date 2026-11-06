@@ -9,7 +9,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- The node's telemetry files (the Alloy agent, the GPU exporter and `run_scheduled.sh`) from the
-  CML overlay in CMLPlatform/monitoring, with `.copier-answers.cml.yml` and `telemetry.env.example`.
+- The node's telemetry files from the two layers of the CML overlay in CMLPlatform/monitoring:
+  `run_scheduled.sh` and `telemetry.env.example` from the project layer
+  (`.copier-answers.cml.yml`), and the machine's Alloy agent and GPU exporter from the host layer
+  (`.copier-answers.cml-host.yml`).
 
 [Unreleased]: https://github.com/CMLPlatform/cmlops/commits/HEAD
